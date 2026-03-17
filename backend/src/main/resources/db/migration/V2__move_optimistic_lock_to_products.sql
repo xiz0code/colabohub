@@ -1,0 +1,13 @@
+alter table tenants drop column if exists version;
+alter table roles drop column if exists version;
+alter table app_users drop column if exists version;
+alter table stores drop column if exists version;
+alter table store_users drop column if exists version;
+alter table commission_rules drop column if exists version;
+alter table app_settings drop column if exists version;
+alter table product_promotions drop column if exists version;
+alter table uf_daily_values drop column if exists version;
+alter table sales drop column if exists version;
+alter table sale_items drop column if exists version;
+alter table sale_store_summaries drop column if exists version;
+alter table stock_movements drop column if exists version;

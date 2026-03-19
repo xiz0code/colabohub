@@ -9,9 +9,12 @@ vi.mock("@/features/auth/session/SessionProvider", () => ({
   useSession: () => ({
     user: {
       id: 1,
-      email: "admin.tienda@colaborapp.cl",
+      email: "admin.tienda@colabohub.cl",
       fullName: "Admin Tienda",
+      active: true,
       roles: ["ADMIN_MARKET"],
+      activeMarketId: 1,
+      activeMarketName: "Sakura Store",
       marketIds: [1],
       storeIds: [],
     },
@@ -19,16 +22,13 @@ vi.mock("@/features/auth/session/SessionProvider", () => ({
   }),
 }));
 
-vi.mock("@/features/reports/api/reportApi", () => ({
-  getSalesTodayDetails: vi.fn(),
-}));
-
 vi.mock("@/features/sales/api/posApi", () => ({
   addPosSaleItem: vi.fn(),
   cancelPosSale: vi.fn(),
   confirmPosSale: vi.fn(),
   createPosSale: vi.fn(),
-  getOpenPosSale: vi.fn(),
+  getPosSale: vi.fn(),
+  listPosSales: vi.fn(),
   recalculatePosSale: vi.fn(),
   removePosSaleItem: vi.fn(),
   scanPosProduct: vi.fn(),
@@ -37,15 +37,25 @@ vi.mock("@/features/sales/api/posApi", () => ({
   updatePosSaleItem: vi.fn(),
 }));
 
-import { getSalesTodayDetails } from "@/features/reports/api/reportApi";
-import { confirmPosSale, createPosSale, getOpenPosSale } from "@/features/sales/api/posApi";
+import {
+  cancelPosSale,
+  confirmPosSale,
+  createPosSale,
+  getPosSale,
+  listPosSales,
+  searchPosProducts,
+  updatePosPaymentMethod,
+} from "@/features/sales/api/posApi";
 
 function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
   return {
     id: 10,
     saleNumber: "S-2026-00000010",
+    marketId: 1,
     status,
     paymentMethod: "DEBITO" as const,
+    netAmount: 24285,
+    ivaAmount: 4615,
     subtotalAmount: 28900,
     totalDiscountAmount: 0,
     totalAmount: 28900,
@@ -56,6 +66,9 @@ function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
     commissionPercentageValue: 0.0079,
     openedAt: "2026-03-15T12:00:00Z",
     confirmedAt: status === "CONFIRMED" ? "2026-03-15T12:10:00Z" : null,
+    cancelledAt: status === "CANCELLED" ? "2026-03-15T12:20:00Z" : null,
+    cancelledBy: status === "CANCELLED" ? "admin.tienda@colabohub.cl" : null,
+    cancellationReason: status === "CANCELLED" ? "Cliente solicito anulacion" : null,
     items: [
       {
         id: 99,
@@ -79,6 +92,12 @@ function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
         commissionIvaAmount: 56,
         totalCommissionAmount: 350,
         netAmount: 28550,
+        promotionApplied: false,
+        ufValue: 39000,
+        commissionUfValue: 0.00169,
+        commissionPercentageValue: 0.0079,
+        totalCollaboratorAmount: 28550,
+        totalClientAmount: 28900,
       },
     ],
     storeSummaries: [
@@ -98,39 +117,23 @@ function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
   };
 }
 
-function buildSalesTodayDetails() {
-  return {
-    businessDate: "2026-03-15",
-    totalSales: 1,
-    totalAmount: 28900,
-    totalCommission: 350,
-    totalNet: 28550,
-    salesCount: 1,
-    stores: [],
-    sales: [
-      {
-        saleId: 10,
-        saleNumber: "S-2026-00000010",
-        confirmedAt: "2026-03-15T12:10:00Z",
-        totalAmount: 28900,
-        totalCommissionAmount: 350,
-        totalNetAmount: 28550,
-        stores: [],
-        items: [
-          {
-            itemId: 99,
-            productName: "Sticker BTS",
-            collaboratorName: "Camila",
-            storeName: "Tienda Central",
-            quantity: 1,
-            subtotalAmount: 28900,
-            totalCommissionAmount: 350,
-            netAmount: 28550,
-          },
-        ],
-      },
-    ],
-  };
+function buildSales() {
+  return [
+    {
+      id: 10,
+      saleNumber: "S-2026-00000010",
+      type: "POS",
+      dateTime: "2026-03-15T12:10:00Z",
+      status: "CONFIRMED" as const,
+      subtotalAmount: 28900,
+      netAmount: 24285,
+      ivaAmount: 4615,
+      totalAmount: 28900,
+      paymentMethod: "DEBITO" as const,
+      marketId: 1,
+      sellerName: "Admin Tienda",
+    },
+  ];
 }
 
 function renderPage() {
@@ -154,40 +157,33 @@ describe("SalesPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getSalesTodayDetails).mockResolvedValue(buildSalesTodayDetails());
+    vi.mocked(listPosSales).mockResolvedValue(buildSales());
     vi.mocked(createPosSale).mockResolvedValue(buildSale("OPEN"));
+    vi.mocked(getPosSale).mockResolvedValue(buildSale("CONFIRMED"));
+    vi.mocked(searchPosProducts).mockResolvedValue([]);
   });
 
-  it("does not render a Tienda selector and highlights total a cobrar", async () => {
-    vi.mocked(getOpenPosSale).mockResolvedValue(buildSale("OPEN"));
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText(/Total a cobrar/i)).toBeInTheDocument();
-    });
-
-    expect(screen.queryByLabelText("Tienda activa")).not.toBeInTheDocument();
-    expect(screen.getAllByText("$28.900").length).toBeGreaterThan(0);
-    expect(screen.getByText("Camila")).toBeInTheDocument();
-  });
-
-  it("communicates when an existing open sale is reused", async () => {
-    vi.mocked(getOpenPosSale).mockResolvedValue(buildSale("OPEN"));
-
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("Ya existia una venta abierta para tu Tienda y se reutilizo.")).toBeInTheDocument();
-    });
-  });
-
-  it("requires a confirmation modal before confirming", async () => {
-    vi.mocked(getOpenPosSale).mockResolvedValue(buildSale("OPEN"));
-
+  it("abre una nueva venta sin selector de Espacio y muestra el total a cobrar", async () => {
     renderPage();
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/TOTAL A COBRAR/i)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText("Espacio activo")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Ventas de Sakura Store/i })).toBeInTheDocument();
+    expect(screen.getAllByText("$28.900").length).toBeGreaterThan(0);
+  });
+
+  it("requiere modal de confirmacion antes de confirmar la venta", async () => {
+    renderPage();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
+
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirmar venta" })).toBeInTheDocument();
     });
@@ -198,13 +194,13 @@ describe("SalesPage", () => {
     expect(vi.mocked(confirmPosSale)).not.toHaveBeenCalled();
   });
 
-  it("confirms the sale, closes the modal and refreshes daily sales feedback", async () => {
-    vi.mocked(getOpenPosSale).mockResolvedValue(buildSale("OPEN"));
+  it("confirma la venta y refresca el listado principal", async () => {
     vi.mocked(confirmPosSale).mockResolvedValue(buildSale("CONFIRMED"));
 
     renderPage();
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirmar venta" })).toBeInTheDocument();
     });
@@ -216,7 +212,148 @@ describe("SalesPage", () => {
       expect(screen.getByText("Venta registrada correctamente")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("Deseas confirmar esta venta?")).not.toBeInTheDocument();
-    expect(screen.getByText("Ventas registradas hoy")).toBeInTheDocument();
+    expect(listPosSales).toHaveBeenCalled();
+    expect(screen.getByText("Ventas de Sakura Store")).toBeInTheDocument();
+  });
+
+  it("muestra el detalle de venta con tienda y datos de comision", async () => {
+    renderPage();
+
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Ver detalle" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Ver detalle" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Detalle S-2026-00000010")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Camila")).toBeInTheDocument();
+    expect(screen.getByText("Comision fija")).toBeInTheDocument();
+  });
+
+  it("solicita motivo obligatorio al anular una venta", async () => {
+    vi.mocked(cancelPosSale).mockResolvedValue(buildSale("CANCELLED"));
+
+    renderPage();
+
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Anular venta" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Anular venta" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Motivo de anulacion")).toBeInTheDocument();
+    });
+
+    const confirmButton = screen.getByRole("button", { name: "Confirmar anulacion" });
+    expect(confirmButton).toBeDisabled();
+
+    await user.type(screen.getByRole("textbox"), "Cliente solicito anulacion");
+    expect(confirmButton).not.toBeDisabled();
+
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(cancelPosSale).toHaveBeenCalledWith(10, "Cliente solicito anulacion");
+    });
+  });
+
+  it("intercepta el cierre del POS cuando ya hay productos y permite seguir vendiendo", async () => {
+    renderPage();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/TOTAL A COBRAR/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Cancelar venta en curso")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Seguir vendiendo" }));
+
+    expect(screen.queryByText("Cancelar venta en curso")).not.toBeInTheDocument();
+    expect(cancelPosSale).not.toHaveBeenCalled();
+    expect(screen.getByText(/TOTAL A COBRAR/i)).toBeInTheDocument();
+  });
+
+  it("calcula vuelto cuando la venta se cobra en efectivo", async () => {
+    vi.mocked(updatePosPaymentMethod).mockResolvedValue({
+      ...buildSale("OPEN"),
+      paymentMethod: "CASH",
+    });
+
+    renderPage();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox")).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByRole("combobox"), "CASH");
+
+    await waitFor(() => {
+      expect(screen.getByText("Monto recibido")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText("Ingresa el efectivo recibido"), "30000");
+
+    expect(screen.getByText("$1.100")).toBeInTheDocument();
+  });
+
+  it("muestra el nombre de la tienda duena del producto en los resultados de busqueda del POS", async () => {
+    vi.mocked(searchPosProducts).mockResolvedValue([
+      {
+        id: 201,
+        storeId: 200,
+        storeName: "Stock principal",
+        collaboratorName: "Camila",
+        name: "Photocard",
+        sku: "PHOTOCARDS",
+        barcode: "BAR-201",
+        stock: 9,
+        salePrice: 2000,
+      },
+      {
+        id: 202,
+        storeId: 200,
+        storeName: "Stock principal",
+        collaboratorName: "Karina",
+        name: "Photocard K-pop",
+        sku: "PHOTOCARDS-KPOP",
+        barcode: "BAR-202",
+        stock: 498,
+        salePrice: 1000,
+      },
+    ]);
+
+    renderPage();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Busca por nombre, SKU o codigo de barras")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText("Busca por nombre, SKU o codigo de barras"), "Photo");
+
+    await waitFor(() => {
+      expect(screen.getByText("Tienda: Camila")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Tienda: Karina")).toBeInTheDocument();
+    expect(screen.queryByText("Tienda: Stock principal")).not.toBeInTheDocument();
   });
 });

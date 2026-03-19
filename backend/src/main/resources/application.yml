@@ -35,11 +35,26 @@ management:
         include: health,info
 
 springdoc:
+  api-docs:
+    enabled: false
   swagger-ui:
+    enabled: false
     path: /swagger-ui.html
 
 app:
   frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
   business-zone: ${APP_BUSINESS_ZONE:America/Santiago}
+  alerts:
+    critical-email: ${APP_ALERTS_CRITICAL_EMAIL:}
+  security:
+    rate-limit:
+      login:
+        enabled: ${APP_SECURITY_RATE_LIMIT_LOGIN_ENABLED:false}
+        max-requests: ${APP_SECURITY_RATE_LIMIT_LOGIN_MAX_REQUESTS:10}
+        window-seconds: ${APP_SECURITY_RATE_LIMIT_LOGIN_WINDOW_SECONDS:60}
+      pos:
+        enabled: ${APP_SECURITY_RATE_LIMIT_POS_ENABLED:false}
+        max-requests: ${APP_SECURITY_RATE_LIMIT_POS_MAX_REQUESTS:45}
+        window-seconds: ${APP_SECURITY_RATE_LIMIT_POS_WINDOW_SECONDS:60}
   auth:
     bootstrap-admin-email: ${APP_AUTH_BOOTSTRAP_ADMIN_EMAIL:}

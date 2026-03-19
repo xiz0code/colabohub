@@ -27,6 +27,8 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             Instant startAt,
             Instant endAt);
 
+    List<Sale> findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(Long tenantId, Long marketId);
+
     Optional<Sale> findFirstBySaleNumberStartingWithOrderBySaleNumberDesc(String prefix);
 
     @Query("""

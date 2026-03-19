@@ -13,6 +13,10 @@ public interface MarketRepository extends JpaRepository<Market, Long> {
 
     List<Market> findByTenantIdAndIdInOrderByNameAsc(Long tenantId, List<Long> ids);
 
+    List<Market> findByActiveTrueOrderByNameAsc();
+
+    Optional<Market> findFirstByUfValueIsNotNullOrderByUfUpdatedAtDescIdDesc();
+
     Optional<Market> findByIdAndTenantId(Long id, Long tenantId);
 
     boolean existsByTenantIdAndNameIgnoreCase(Long tenantId, String name);

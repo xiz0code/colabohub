@@ -21,7 +21,11 @@ public class MailService {
     public void send(String to, String subject, String body) {
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
-            log.info("Mail infrastructure is not configured. Logging email instead. To={}, Subject={}, Body={}", to, subject, body);
+            log.info(
+                    "Mail infrastructure is not configured. Email delivery skipped. To={}, Subject={}, BodyLength={}",
+                    to,
+                    subject,
+                    body != null ? body.length() : 0);
             return;
         }
 
@@ -32,10 +36,10 @@ public class MailService {
             message.setText(body);
             mailSender.send(message);
         } catch (Exception exception) {
-            log.warn("Failed to send email. Logging content instead. To={}, Subject={}, Body={}",
+            log.warn("Failed to send email. To={}, Subject={}, BodyLength={}",
                     to,
                     subject,
-                    body,
+                    body != null ? body.length() : 0,
                     exception);
         }
     }

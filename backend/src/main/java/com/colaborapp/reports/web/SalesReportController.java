@@ -2,11 +2,15 @@ package com.colaborapp.reports.web;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.security.access.prepost.PreAuthorize;
 
+import java.time.LocalDate;
+
 import com.colaborapp.reports.service.SalesReportService;
+import com.colaborapp.reports.web.dto.CollaboratorSalesReportResponse;
 import com.colaborapp.reports.web.dto.DashboardSummaryResponse;
 import com.colaborapp.reports.web.dto.SalesTodayDetailsResponse;
 import com.colaborapp.reports.web.dto.SalesTodayReportResponse;
@@ -43,5 +47,14 @@ public class SalesReportController {
     @PreAuthorize("@accessControl.canAccessStore(#storeId)")
     public StoreSalesReportResponse getStoreReport(@PathVariable Long storeId) {
         return salesReportService.getStoreReport(storeId);
+    }
+
+    @GetMapping("/collaborator/{collaboratorUserId}")
+    @PreAuthorize("@accessControl.canAccessOperationalReports()")
+    public CollaboratorSalesReportResponse getCollaboratorReport(
+            @PathVariable Long collaboratorUserId,
+            @RequestParam(required = false) LocalDate dateFrom,
+            @RequestParam(required = false) LocalDate dateTo) {
+        return salesReportService.getCollaboratorSalesReport(collaboratorUserId, dateFrom, dateTo);
     }
 }

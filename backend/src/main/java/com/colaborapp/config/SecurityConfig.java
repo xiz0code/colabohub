@@ -1,5 +1,7 @@
 package com.colaborapp.config;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -58,6 +60,13 @@ public class SecurityConfig {
                         .anyRequest().authenticated())
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(userInfo -> userInfo.userService(googleOAuth2UserService))
+                        .failureHandler((request, response, exception) -> {
+                            String message = exception.getMessage() == null || exception.getMessage().isBlank()
+                                    ? "No pudimos iniciar sesion con esa cuenta. Verifica que tu correo tenga acceso a ColaboHub."
+                                    : exception.getMessage();
+                            String encodedMessage = URLEncoder.encode(message, StandardCharsets.UTF_8);
+                            response.sendRedirect(frontendBaseUrl + "/login?error=" + encodedMessage);
+                        })
                         .defaultSuccessUrl(frontendBaseUrl + "/dashboard", true))
                 .logout(logout -> logout.logoutSuccessUrl(frontendBaseUrl + "/login"));
 

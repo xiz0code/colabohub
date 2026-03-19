@@ -33,6 +33,7 @@ public class SettingsController {
         return new GlobalFinancialSettingsResponse(
                 settings.currentUfValue(),
                 settings.ufLastUpdatedAt(),
+                settings.useDynamicFixedCommission(),
                 settings.globalCommissionUfValue(),
                 settings.globalCommissionPercentageValue());
     }
@@ -45,6 +46,27 @@ public class SettingsController {
                 settings.marketName(),
                 settings.ufValue(),
                 settings.ufUpdatedAt(),
+                settings.ufManualOverride(),
+                settings.useDynamicFixedCommission(),
+                settings.overrideEnabled(),
+                settings.globalCommissionUfValue(),
+                settings.globalCommissionPercentageValue(),
+                settings.effectiveCommissionUfValue(),
+                settings.effectiveCommissionPercentageValue(),
+                settings.globalPromotionEnabled(),
+                settings.globalPromotionPercentage());
+    }
+
+    @PutMapping("/uf/auto")
+    public MarketFinancialSettingsResponse resetMarketUfValueToAutomatic() {
+        var settings = commissionSettingsService.resetMarketUfToAutomatic();
+        return new MarketFinancialSettingsResponse(
+                settings.marketId(),
+                settings.marketName(),
+                settings.ufValue(),
+                settings.ufUpdatedAt(),
+                settings.ufManualOverride(),
+                settings.useDynamicFixedCommission(),
                 settings.overrideEnabled(),
                 settings.globalCommissionUfValue(),
                 settings.globalCommissionPercentageValue(),
@@ -60,6 +82,7 @@ public class SettingsController {
         return new GlobalFinancialSettingsResponse(
                 settings.currentUfValue(),
                 settings.ufLastUpdatedAt(),
+                settings.useDynamicFixedCommission(),
                 settings.globalCommissionUfValue(),
                 settings.globalCommissionPercentageValue());
     }
@@ -68,10 +91,12 @@ public class SettingsController {
     public GlobalFinancialSettingsResponse updateGlobalCommissions(@Valid @RequestBody GlobalCommissionSettingsRequest request) {
         var settings = commissionSettingsService.updateGlobalCommissionSettings(
                 request.commissionUfValue(),
-                request.commissionPercentageValue());
+                request.commissionPercentageValue(),
+                request.useDynamicFixedCommission());
         return new GlobalFinancialSettingsResponse(
                 settings.currentUfValue(),
                 settings.ufLastUpdatedAt(),
+                settings.useDynamicFixedCommission(),
                 settings.globalCommissionUfValue(),
                 settings.globalCommissionPercentageValue());
     }
@@ -84,6 +109,8 @@ public class SettingsController {
                 settings.marketName(),
                 settings.ufValue(),
                 settings.ufUpdatedAt(),
+                settings.ufManualOverride(),
+                settings.useDynamicFixedCommission(),
                 settings.overrideEnabled(),
                 settings.globalCommissionUfValue(),
                 settings.globalCommissionPercentageValue(),
@@ -109,6 +136,8 @@ public class SettingsController {
                 settings.marketName(),
                 settings.ufValue(),
                 settings.ufUpdatedAt(),
+                settings.ufManualOverride(),
+                settings.useDynamicFixedCommission(),
                 settings.overrideEnabled(),
                 settings.globalCommissionUfValue(),
                 settings.globalCommissionPercentageValue(),

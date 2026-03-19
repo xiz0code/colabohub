@@ -25,5 +25,11 @@ public record PosSaleItemResponse(
         BigDecimal commission2Amount,
         BigDecimal commissionIvaAmount,
         BigDecimal totalCommissionAmount,
-        BigDecimal netAmount) {
+        BigDecimal netAmount,
+        boolean promotionApplied,
+        BigDecimal ufValue,
+        BigDecimal commissionUfValue,
+        BigDecimal commissionPercentageValue,
+        BigDecimal totalCollaboratorAmount,
+        BigDecimal totalClientAmount) {
 }

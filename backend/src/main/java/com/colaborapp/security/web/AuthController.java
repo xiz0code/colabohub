@@ -25,9 +25,11 @@ public class AuthController {
                 snapshot.user().getId(),
                 snapshot.user().getEmail(),
                 snapshot.user().getFullName(),
+                snapshot.active(),
                 snapshot.roles() == null ? List.of() : List.copyOf(snapshot.roles()),
+                snapshot.activeMarketId(),
+                snapshot.activeMarketName(),
                 snapshot.marketIds() == null ? List.of() : List.copyOf(snapshot.marketIds()),
-                snapshot.storeIds() == null ? List.of() : List.copyOf(snapshot.storeIds()),
-                snapshot.marketNames() != null && snapshot.marketNames().size() == 1 ? snapshot.marketNames().getFirst() : null);
+                snapshot.storeIds() == null ? List.of() : List.copyOf(snapshot.storeIds()));
     }
 }

@@ -25,7 +25,10 @@ type UserFormState = {
   phone: string;
   contactName: string;
   description: string;
-  marketIds: string[];
+  marketId: string;
+  monthlyRent: string;
+  startDate: string;
+  standNumber: string;
   active: boolean;
 };
 
@@ -35,7 +38,10 @@ const initialFormState: UserFormState = {
   phone: "",
   contactName: "",
   description: "",
-  marketIds: [],
+  marketId: "",
+  monthlyRent: "",
+  startDate: "",
+  standNumber: "",
   active: true,
 };
 
@@ -72,11 +78,11 @@ export function UsersPage() {
     mutationFn: createUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      setFeedback({ kind: "success", message: "Colaborador creado correctamente." });
+      setFeedback({ kind: "success", message: "Tienda creada correctamente." });
       handleCloseModal();
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible crear el colaborador.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible crear la Tienda.") });
     },
   });
 
@@ -84,11 +90,11 @@ export function UsersPage() {
     mutationFn: ({ userId, input }: { userId: number; input: UpsertUserInput }) => updateUser(userId, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      setFeedback({ kind: "success", message: "Colaborador actualizado correctamente." });
+      setFeedback({ kind: "success", message: "Tienda actualizada correctamente." });
       handleCloseModal();
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar el colaborador.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar la Tienda.") });
     },
   });
 
@@ -98,11 +104,11 @@ export function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setFeedback({
         kind: "success",
-        message: variables.active ? "Colaborador activado correctamente." : "Colaborador desactivado correctamente.",
+        message: variables.active ? "Tienda activada correctamente." : "Tienda desactivada correctamente.",
       });
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cambiar el estado del colaborador.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cambiar el estado de la Tienda.") });
     },
   });
 
@@ -120,7 +126,10 @@ export function UsersPage() {
       phone: user.phone ?? "",
       contactName: user.contactName ?? "",
       description: user.description ?? "",
-      marketIds: user.marketIds.map(String),
+      marketId: user.marketIds[0] ? String(user.marketIds[0]) : "",
+      monthlyRent: user.monthlyRent != null ? String(user.monthlyRent) : "",
+      startDate: user.startDate ?? "",
+      standNumber: user.standNumber ?? "",
       active: user.active,
     });
     setIsModalOpen(true);
@@ -141,8 +150,11 @@ export function UsersPage() {
       phone: formState.phone || undefined,
       contactName: formState.contactName || undefined,
       description: formState.description || undefined,
+      monthlyRent: formState.monthlyRent ? Number(formState.monthlyRent) : undefined,
+      startDate: formState.startDate || undefined,
+      standNumber: formState.standNumber || undefined,
       role: "STORE_USER",
-      marketIds: formState.marketIds.map(Number),
+      marketIds: formState.marketId ? [Number(formState.marketId)] : undefined,
       active: formState.active,
     };
 
@@ -157,9 +169,9 @@ export function UsersPage() {
   return (
     <section>
       <PageHeader
-        title="Colaboradores"
-        description="Gestiona usuarios de lectura restringida asociados a Tiendas. No pueden vender, ajustar stock ni administrar el sistema."
-        eyebrow={primaryRole === "ADMIN_SYSTEM" ? "Vista global" : "Gestion de Tienda"}
+        title="Tiendas"
+        description="Gestiona Tiendas internas asociadas a un Espacio. Mantienen su acceso restringido y no administran el sistema."
+        eyebrow={primaryRole === "ADMIN_SYSTEM" ? "Vista global" : "Gestion de Espacio"}
       />
 
       <div className="space-y-6">
@@ -170,7 +182,7 @@ export function UsersPage() {
             <div>
               <h2 className="text-xl font-semibold">Equipo operativo</h2>
               <p className="text-sm text-muted-foreground">
-                Los Administradores de Tienda pueden manejar colaboradores solo dentro de su alcance asignado.
+                Los Administradores de Espacio pueden manejar Tiendas solo dentro de su alcance asignado.
               </p>
             </div>
             <button
@@ -178,19 +190,19 @@ export function UsersPage() {
               onClick={openCreateModal}
               className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)]"
             >
-              Nuevo colaborador
+              Nueva Tienda
             </button>
           </div>
 
-          {usersQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando colaboradores..." /> : null}
+          {usersQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando Tiendas..." /> : null}
           {usersQuery.isError ? (
-            <FeedbackMessage kind="error" message={getErrorMessage(usersQuery.error, "No fue posible cargar los colaboradores.")} />
+            <FeedbackMessage kind="error" message={getErrorMessage(usersQuery.error, "No fue posible cargar las Tiendas.")} />
           ) : null}
 
           {!usersQuery.isLoading && !usersQuery.isError && visibleUsers.length === 0 ? (
             <EmptyState
-              title="No hay colaboradores"
-              description="Crea el primer colaborador de una Tienda para habilitar su acceso de lectura."
+              title="No hay Tiendas"
+              description="Crea la primera Tienda de un Espacio para habilitar su acceso y gestion."
             />
           ) : (
             <div className="soft-table">
@@ -200,7 +212,8 @@ export function UsersPage() {
                     <th>Nombre</th>
                     <th>Correo</th>
                     <th>Rol</th>
-                    <th>Tiendas asignadas</th>
+                    <th>Espacio</th>
+                    <th>Fecha creacion</th>
                     <th>Estado</th>
                     <th>Acciones</th>
                   </tr>
@@ -225,7 +238,8 @@ export function UsersPage() {
                         <td>
                           <RoleBadge role={role} />
                         </td>
-                        <td>{marketNames || "Sin Tienda asignada"}</td>
+                        <td>{marketNames || "Sin Espacio asignado"}</td>
+                        <td>{formatDate(user.createdAt)}</td>
                         <td>
                           <span
                             className={[
@@ -268,14 +282,14 @@ export function UsersPage() {
 
       <Modal
         open={isModalOpen}
-        title={editingUser ? "Editar colaborador" : "Nuevo colaborador"}
-        description="Los colaboradores ingresan con Google usando su correo configurado y quedan con permiso interno STORE_USER."
+        title={editingUser ? "Editar Tienda" : "Nueva Tienda"}
+        description="Las Tiendas ingresan con Google usando su correo configurado y quedan con permiso interno STORE_USER."
         onClose={handleCloseModal}
       >
         <form onSubmit={handleSubmit} className="grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2 text-sm">
-              <span>Nombre</span>
+              <span>Nombre de la tienda</span>
               <input
                 required
                 value={formState.fullName}
@@ -309,28 +323,58 @@ export function UsersPage() {
                 className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
               />
             </label>
+            <label className="grid gap-2 text-sm">
+              <span>Arriendo mensual</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formState.monthlyRent}
+                onChange={(event) => setFormState((current) => ({ ...current, monthlyRent: event.target.value }))}
+                className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
+              />
+            </label>
+            <label className="grid gap-2 text-sm">
+              <span>Fecha de inicio</span>
+              <input
+                type="date"
+                value={formState.startDate}
+                onChange={(event) => setFormState((current) => ({ ...current, startDate: event.target.value }))}
+                className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
+              />
+            </label>
+            <label className="grid gap-2 text-sm md:col-span-2">
+              <span>Numero de stand</span>
+              <input
+                value={formState.standNumber}
+                onChange={(event) => setFormState((current) => ({ ...current, standNumber: event.target.value }))}
+                className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
+              />
+            </label>
           </div>
 
-          <label className="grid gap-2 text-sm">
-            <span>Tiendas asignadas</span>
-            <select
-              multiple
-              value={formState.marketIds}
-              onChange={(event) =>
-                setFormState((current) => ({
-                  ...current,
-                  marketIds: Array.from(event.target.selectedOptions, (option) => option.value),
-                }))
-              }
-              className="min-h-32 rounded-2xl border border-input bg-background/80 px-3 py-2.5"
-            >
-              {(marketsQuery.data ?? []).map((market) => (
-                <option key={market.id} value={String(market.id)}>
-                  {market.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {primaryRole === "ADMIN_SYSTEM" ? (
+            <label className="grid gap-2 text-sm">
+              <span>Espacio</span>
+              <select
+                required
+                value={formState.marketId}
+                onChange={(event) => setFormState((current) => ({ ...current, marketId: event.target.value }))}
+                className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
+              >
+                <option value="">Selecciona un Espacio</option>
+                {(marketsQuery.data ?? []).map((market) => (
+                  <option key={market.id} value={String(market.id)}>
+                    {market.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
+              Esta Tienda se asignara automaticamente al Espacio activo que administras.
+            </div>
+          )}
 
           <label className="grid gap-2 text-sm">
             <span>Descripcion</span>
@@ -348,7 +392,7 @@ export function UsersPage() {
               checked={formState.active}
               onChange={(event) => setFormState((current) => ({ ...current, active: event.target.checked }))}
             />
-            Colaborador activo
+            Tienda activa
           </label>
 
           <div className="flex justify-end">
@@ -357,7 +401,7 @@ export function UsersPage() {
               disabled={createMutation.isPending || updateMutation.isPending}
               className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
             >
-              {editingUser ? "Guardar cambios" : "Crear colaborador"}
+              {editingUser ? "Guardar cambios" : "Crear Tienda"}
             </button>
           </div>
         </form>
@@ -374,4 +418,10 @@ function getErrorMessage(error: unknown, fallback: string) {
     return error.message;
   }
   return fallback;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("es-CL", {
+    dateStyle: "medium",
+  }).format(new Date(value));
 }

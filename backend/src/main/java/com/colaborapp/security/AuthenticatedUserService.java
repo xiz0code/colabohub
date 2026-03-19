@@ -2,6 +2,7 @@ package com.colaborapp.security;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -73,28 +74,31 @@ public class AuthenticatedUserService {
     public record CurrentAuthenticatedUser(
             User user,
             List<String> roles,
+            boolean active,
+            Long activeMarketId,
+            String activeMarketName,
             List<Long> marketIds,
             List<Long> storeIds,
             List<String> marketNames) {
     }
 
     private CurrentAuthenticatedUser toSnapshot(User user) {
+        TreeMap<Long, String> accessibleMarkets = new TreeMap<>();
+        user.getMarkets().forEach(market -> accessibleMarkets.put(market.getId(), market.getName()));
+        user.getStores().forEach(store -> accessibleMarkets.putIfAbsent(store.getMarket().getId(), store.getMarket().getName()));
+
         List<String> roles = resolveRoleNames(
                 user.getEmail(),
                 user.getRoles().stream().map(role -> role.getCode().name()).toList());
-        List<Long> marketIds = user.getMarkets().stream()
-                .map(market -> market.getId())
-                .sorted()
-                .toList();
+        List<Long> marketIds = accessibleMarkets.keySet().stream().toList();
         List<Long> storeIds = user.getStores().stream()
                 .map(store -> store.getId())
                 .sorted()
                 .toList();
-        List<String> marketNames = user.getMarkets().stream()
-                .map(market -> market.getName())
-                .sorted()
-                .toList();
-        return new CurrentAuthenticatedUser(user, roles, marketIds, storeIds, marketNames);
+        List<String> marketNames = accessibleMarkets.values().stream().toList();
+        Long activeMarketId = roles.contains(RoleCode.ADMIN_SYSTEM.name()) || marketIds.isEmpty() ? null : marketIds.getFirst();
+        String activeMarketName = activeMarketId == null ? null : accessibleMarkets.get(activeMarketId);
+        return new CurrentAuthenticatedUser(user, roles, user.isActive(), activeMarketId, activeMarketName, marketIds, storeIds, marketNames);
     }
 
     private CurrentAuthenticatedUser snapshotFromPrincipal(ColaborAppUserPrincipal principal) {
@@ -113,8 +117,10 @@ public class AuthenticatedUserService {
         List<Long> marketIds = principal.marketIds() == null ? List.of() : List.copyOf(principal.marketIds());
         List<Long> storeIds = principal.storeIds() == null ? List.of() : List.copyOf(principal.storeIds());
         List<String> marketNames = List.of();
+        Long activeMarketId = roles.contains(RoleCode.ADMIN_SYSTEM.name()) || marketIds.isEmpty() ? null : marketIds.getFirst();
+        String activeMarketName = null;
 
-        return new CurrentAuthenticatedUser(user, roles, marketIds, storeIds, marketNames);
+        return new CurrentAuthenticatedUser(user, roles, user.isActive(), activeMarketId, activeMarketName, marketIds, storeIds, marketNames);
     }
 
     private Role toRole(String roleName) {

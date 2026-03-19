@@ -4,10 +4,12 @@ export type CurrentUser = {
   id: number;
   email: string;
   fullName: string;
+  active: boolean;
   roles: string[];
+  activeMarketId: number | null;
+  activeMarketName: string | null;
   marketIds: number[];
   storeIds: number[];
-  activeMarketName: string | null;
 };
 
 export function getCurrentUser() {

@@ -39,6 +39,8 @@ public class DailyClosingService {
     private final StoreRepository storeRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final DailyClosingEmailService dailyClosingEmailService;
+    private final CollaboratorSalesSummaryService collaboratorSalesSummaryService;
+    private final CollaboratorClosingEmailService collaboratorClosingEmailService;
     private final ZoneId businessZone;
 
     public DailyClosingService(
@@ -49,6 +51,8 @@ public class DailyClosingService {
             StoreRepository storeRepository,
             CurrentTenantProvider currentTenantProvider,
             DailyClosingEmailService dailyClosingEmailService,
+            CollaboratorSalesSummaryService collaboratorSalesSummaryService,
+            CollaboratorClosingEmailService collaboratorClosingEmailService,
             @Value("${app.business-zone:America/Santiago}") String businessZone) {
         this.dailyClosingRepository = dailyClosingRepository;
         this.dailyClosingStoreRepository = dailyClosingStoreRepository;
@@ -57,6 +61,8 @@ public class DailyClosingService {
         this.storeRepository = storeRepository;
         this.currentTenantProvider = currentTenantProvider;
         this.dailyClosingEmailService = dailyClosingEmailService;
+        this.collaboratorSalesSummaryService = collaboratorSalesSummaryService;
+        this.collaboratorClosingEmailService = collaboratorClosingEmailService;
         this.businessZone = ZoneId.of(businessZone);
     }
 
@@ -123,6 +129,14 @@ public class DailyClosingService {
             dailyClosingEmailService.sendClosingSummary(market.getEmail(), response);
         } catch (Exception exception) {
             log.warn("Daily closing email could not be sent for market {} and date {}.", marketId, closingDate, exception);
+        }
+        try {
+            collaboratorClosingEmailService.sendDailySummaries(
+                    market.getName(),
+                    closingDate,
+                    collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt));
+        } catch (Exception exception) {
+            log.warn("Daily collaborator closing emails could not be sent for market {} and date {}.", marketId, closingDate, exception);
         }
         return response;
     }

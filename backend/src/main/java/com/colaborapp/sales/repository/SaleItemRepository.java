@@ -2,6 +2,7 @@ package com.colaborapp.sales.repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -32,4 +33,44 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
     Optional<SaleItem> findByIdAndSaleId(Long id, Long saleId);
 
     Optional<SaleItem> findBySaleIdAndProductId(Long saleId, Long productId);
+
+    @Query("""
+            select si from SaleItem si
+            join fetch si.sale sale
+            join fetch si.product product
+            join fetch si.store store
+            join fetch store.market market
+            where sale.tenant.id = :tenantId
+              and market.id = :marketId
+              and sale.status = :status
+              and sale.confirmedAt >= :startAt
+              and sale.confirmedAt < :endAt
+            order by sale.confirmedAt asc, si.id asc
+            """)
+    List<SaleItem> findAllByMarketIdAndPeriodWithDetails(
+            @Param("tenantId") Long tenantId,
+            @Param("marketId") Long marketId,
+            @Param("status") com.colaborapp.sales.domain.SaleStatus status,
+            @Param("startAt") Instant startAt,
+            @Param("endAt") Instant endAt);
+
+    @Query("""
+            select si from SaleItem si
+            join fetch si.sale sale
+            join fetch si.product product
+            join fetch si.store store
+            join fetch store.market market
+            where sale.tenant.id = :tenantId
+              and si.collaboratorUserId = :collaboratorUserId
+              and sale.status = :status
+              and sale.confirmedAt >= :startAt
+              and sale.confirmedAt < :endAt
+            order by sale.confirmedAt asc, si.id asc
+            """)
+    List<SaleItem> findAllByCollaboratorAndPeriodWithDetails(
+            @Param("tenantId") Long tenantId,
+            @Param("collaboratorUserId") Long collaboratorUserId,
+            @Param("status") com.colaborapp.sales.domain.SaleStatus status,
+            @Param("startAt") Instant startAt,
+            @Param("endAt") Instant endAt);
 }

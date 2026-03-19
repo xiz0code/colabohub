@@ -14,7 +14,7 @@ describe("RoleBadge", () => {
     );
 
     expect(screen.getByText("Administrador General")).toBeInTheDocument();
-    expect(screen.getByText("Administrador de Tienda")).toBeInTheDocument();
-    expect(screen.getByText("Colaborador")).toBeInTheDocument();
+    expect(screen.getByText("Administrador de Espacio")).toBeInTheDocument();
+    expect(screen.getByText("Tienda")).toBeInTheDocument();
   });
 });

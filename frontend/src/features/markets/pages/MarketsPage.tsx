@@ -51,11 +51,11 @@ export function MarketsPage() {
     mutationFn: createMarket,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["markets"] });
-      setFeedback({ kind: "success", message: "Tienda creada correctamente." });
+      setFeedback({ kind: "success", message: "Espacio creado correctamente." });
       handleCloseModal();
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible crear la Tienda.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible crear el Espacio.") });
     },
   });
 
@@ -63,11 +63,11 @@ export function MarketsPage() {
     mutationFn: ({ marketId, input }: { marketId: number; input: UpsertMarketInput }) => updateMarket(marketId, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["markets"] });
-      setFeedback({ kind: "success", message: "Tienda actualizada correctamente." });
+      setFeedback({ kind: "success", message: "Espacio actualizado correctamente." });
       handleCloseModal();
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar la Tienda.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar el Espacio.") });
     },
   });
 
@@ -77,11 +77,11 @@ export function MarketsPage() {
       queryClient.invalidateQueries({ queryKey: ["markets"] });
       setFeedback({
         kind: "success",
-        message: variables.active ? "Tienda activada correctamente." : "Tienda desactivada correctamente.",
+        message: variables.active ? "Espacio activado correctamente." : "Espacio desactivado correctamente.",
       });
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cambiar el estado de la Tienda.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cambiar el estado del Espacio.") });
     },
   });
 
@@ -132,8 +132,8 @@ export function MarketsPage() {
   return (
     <section>
       <PageHeader
-        title="Tiendas"
-        description="Administra las Tiendas del sistema, su acceso visible y su disponibilidad operativa desde una experiencia mas limpia y ejecutiva."
+        title="Espacios"
+        description="Administra los Espacios del sistema, su acceso visible y su disponibilidad operativa desde una experiencia mas limpia y ejecutiva."
         eyebrow="Administrador General"
       />
 
@@ -141,20 +141,20 @@ export function MarketsPage() {
         {feedback ? <FeedbackMessage kind={feedback.kind} message={feedback.message} /> : null}
 
         <div className="grid gap-4 lg:grid-cols-3">
-          <MetricCard label="Tiendas registradas" value={String(marketsQuery.data?.length ?? 0)} helper="Base completa del sistema." />
-          <MetricCard label="Tiendas activas" value={String(activeCount)} helper="Disponibles hoy para operar." />
+          <MetricCard label="Espacios registrados" value={String(marketsQuery.data?.length ?? 0)} helper="Base completa del sistema." />
+          <MetricCard label="Espacios activos" value={String(activeCount)} helper="Disponibles hoy para operar." />
           <div className="soft-surface p-6">
             <p className="text-sm text-muted-foreground">Administracion</p>
             <p className="mt-2 text-xl font-semibold tracking-tight">Alta y mantenimiento centralizado</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Solo el Administrador General puede crear o ajustar Tiendas.
+              Solo el Administrador General puede crear o ajustar Espacios.
             </p>
             <button
               type="button"
               onClick={openCreateModal}
               className="mt-5 rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)]"
             >
-              Nueva Tienda
+              Nuevo Espacio
             </button>
           </div>
         </div>
@@ -162,9 +162,9 @@ export function MarketsPage() {
         <div className="soft-surface p-6">
           <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <h2 className="text-xl font-semibold">Listado de Tiendas</h2>
+              <h2 className="text-xl font-semibold">Listado de Espacios</h2>
               <p className="text-sm text-muted-foreground">
-                La entidad interna sigue siendo Market, pero la experiencia visible ya habla en lenguaje de Tienda.
+                La entidad interna sigue siendo Market, pero la experiencia visible ya habla en lenguaje de Espacio.
               </p>
             </div>
             <button
@@ -172,19 +172,19 @@ export function MarketsPage() {
               onClick={openCreateModal}
               className="rounded-full border border-white/85 bg-white/70 px-4 py-2 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5"
             >
-              Crear Tienda
+              Crear Espacio
             </button>
           </div>
 
-          {marketsQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando Tiendas..." /> : null}
+          {marketsQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando Espacios..." /> : null}
           {marketsQuery.isError ? (
-            <FeedbackMessage kind="error" message={getErrorMessage(marketsQuery.error, "No fue posible cargar las Tiendas.")} />
+            <FeedbackMessage kind="error" message={getErrorMessage(marketsQuery.error, "No fue posible cargar los Espacios.")} />
           ) : null}
 
           {!marketsQuery.isLoading && !marketsQuery.isError && (marketsQuery.data?.length ?? 0) === 0 ? (
             <EmptyState
               title="Todavia no hay Tiendas"
-              description="Crea la primera Tienda para habilitar su administracion y luego asignar usuarios."
+              description="Crea el primer Espacio para habilitar su administracion y luego asignar Tiendas."
             />
           ) : (
             <div className="soft-table">
@@ -252,8 +252,8 @@ export function MarketsPage() {
 
       <Modal
         open={isModalOpen}
-        title={editingMarket ? "Editar Tienda" : "Nueva Tienda"}
-        description="Los cambios visibles hablan de Tienda, aunque la estructura interna siga usando Market por estabilidad."
+        title={editingMarket ? "Editar Espacio" : "Nuevo Espacio"}
+        description="Los cambios visibles hablan de Espacio, aunque la estructura interna siga usando Market por estabilidad."
         onClose={handleCloseModal}
       >
         <form onSubmit={handleSubmit} className="grid gap-4">
@@ -311,7 +311,7 @@ export function MarketsPage() {
               checked={formState.active}
               onChange={(event) => setFormState((current) => ({ ...current, active: event.target.checked }))}
             />
-            Tienda activa
+            Espacio activo
           </label>
 
           <div className="flex justify-end">
@@ -320,7 +320,7 @@ export function MarketsPage() {
               disabled={createMutation.isPending || updateMutation.isPending}
               className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
             >
-              {editingMarket ? "Guardar cambios" : "Crear Tienda"}
+              {editingMarket ? "Guardar cambios" : "Crear Espacio"}
             </button>
           </div>
         </form>

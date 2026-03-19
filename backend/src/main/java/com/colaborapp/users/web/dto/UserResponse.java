@@ -1,5 +1,7 @@
 package com.colaborapp.users.web.dto;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.Instant;
 import java.util.List;
 
@@ -10,6 +12,10 @@ public record UserResponse(
         String phone,
         String contactName,
         String description,
+        BigDecimal monthlyRent,
+        LocalDate startDate,
+        String standNumber,
+        boolean factura,
         List<String> roles,
         List<Long> marketIds,
         List<Long> storeIds,

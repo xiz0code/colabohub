@@ -64,6 +64,8 @@ class AuthenticatedUserServiceTest {
         assertThat(snapshot.user().getId()).isEqualTo(99L);
         assertThat(snapshot.user().getEmail()).isEqualTo("xizocode@gmail.com");
         assertThat(snapshot.roles()).containsExactly("ADMIN_SYSTEM");
+        assertThat(snapshot.active()).isTrue();
+        assertThat(snapshot.activeMarketId()).isNull();
         assertThat(snapshot.marketIds()).containsExactly(10L);
         assertThat(snapshot.storeIds()).containsExactly(20L);
     }
@@ -134,6 +136,7 @@ class AuthenticatedUserServiceTest {
 
         assertThat(principal.roles()).containsExactly("ADMIN_SYSTEM");
         assertThat(snapshot.roles()).containsExactly("ADMIN_SYSTEM");
+        assertThat(snapshot.activeMarketId()).isNull();
     }
 
     @Test

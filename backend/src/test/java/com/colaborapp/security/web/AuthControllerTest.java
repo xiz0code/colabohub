@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.hamcrest.Matchers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -46,6 +47,9 @@ class AuthControllerTest {
                 new AuthenticatedUserService.CurrentAuthenticatedUser(
                         user,
                         List.of("ADMIN_SYSTEM"),
+                        true,
+                        null,
+                        null,
                         List.of(10L, 20L),
                         List.of(30L),
                         List.of("Sakura Store", "Momo Store")));
@@ -55,7 +59,10 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.email").value("xizocode@gmail.com"))
                 .andExpect(jsonPath("$.fullName").value("Xizo Code"))
+                .andExpect(jsonPath("$.active").value(true))
                 .andExpect(jsonPath("$.roles[0]").value("ADMIN_SYSTEM"))
+                .andExpect(jsonPath("$.activeMarketId").value(Matchers.nullValue()))
+                .andExpect(jsonPath("$.activeMarketName").value(Matchers.nullValue()))
                 .andExpect(jsonPath("$.marketIds[0]").value(10))
                 .andExpect(jsonPath("$.storeIds[0]").value(30));
     }
@@ -71,6 +78,9 @@ class AuthControllerTest {
                 new AuthenticatedUserService.CurrentAuthenticatedUser(
                         user,
                         List.of(),
+                        true,
+                        null,
+                        null,
                         List.of(),
                         List.of(),
                         List.of()));
@@ -78,6 +88,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/me").with(user("admin@colaborapp.cl")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.roles").isArray())
+                .andExpect(jsonPath("$.active").value(true))
                 .andExpect(jsonPath("$.marketIds").isArray())
                 .andExpect(jsonPath("$.storeIds").isArray());
     }

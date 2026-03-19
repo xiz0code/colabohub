@@ -52,10 +52,14 @@ public class PosProductLookupService {
     }
 
     private PosProductResponse toResponse(Product product) {
+        String collaboratorName = product.getOwnerUser() != null && product.getOwnerUser().getFullName() != null && !product.getOwnerUser().getFullName().isBlank()
+                ? product.getOwnerUser().getFullName()
+                : "Sin colaborador";
         return new PosProductResponse(
                 product.getId(),
                 product.getStore().getId(),
                 product.getStore().getName(),
+                collaboratorName,
                 product.getName(),
                 product.getSku(),
                 product.getBarcode(),

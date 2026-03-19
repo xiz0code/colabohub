@@ -49,7 +49,7 @@ public class UserController {
     }
 
     @PatchMapping("/{id}/status")
-    public UserResponse updateStatus(@PathVariable Long id, @RequestBody UserStatusUpdateRequest request) {
+    public UserResponse updateStatus(@PathVariable Long id, @Valid @RequestBody UserStatusUpdateRequest request) {
         return userService.updateStatus(id, request.active());
     }
 }

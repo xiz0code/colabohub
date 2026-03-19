@@ -22,6 +22,9 @@ import com.colaborapp.markets.repository.MarketRepository;
 import com.colaborapp.sales.domain.UfDailyValue;
 import com.colaborapp.sales.repository.UfDailyValueRepository;
 import com.colaborapp.security.AccessControlService;
+import com.colaborapp.settings.domain.AppSetting;
+import com.colaborapp.settings.domain.AppSettingType;
+import com.colaborapp.settings.repository.AppSettingRepository;
 import com.colaborapp.users.domain.RoleCode;
 
 import lombok.RequiredArgsConstructor;
@@ -38,6 +41,10 @@ public class CommissionSettingsService {
     private final MarketRepository marketRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final AccessControlService accessControlService;
+    private final AppSettingRepository appSettingRepository;
+    private final UfSyncService ufSyncService;
+
+    private static final String USE_DYNAMIC_FIXED_COMMISSION_KEY = "useDynamicFixedCommission";
 
     @Transactional(readOnly = true)
     public GlobalFinancialSettings getGlobalSettings() {
@@ -49,6 +56,7 @@ public class CommissionSettingsService {
         return new GlobalFinancialSettings(
                 ufValue.getUfValue(),
                 ufValue.getEffectiveDate(),
+                useDynamicFixedCommission(tenantId),
                 getGlobalCommissionUfValue(tenantId),
                 getGlobalCommissionPercentageValue(tenantId));
     }
@@ -77,6 +85,8 @@ public class CommissionSettingsService {
                 market.getName(),
                 market.getUfValue(),
                 market.getUfUpdatedAt(),
+                market.isUfManualOverride(),
+                useDynamicFixedCommission(tenantId),
                 hasOverride,
                 globalUfCommission,
                 globalPercentageCommission,
@@ -106,7 +116,7 @@ public class CommissionSettingsService {
 
     @Transactional
     public MarketFinancialSettings updateMarketUfValue(BigDecimal ufValue) {
-        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET);
+        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.ADMIN_SYSTEM);
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         List<Long> marketIds = accessControlService.currentMarketIds();
         if (marketIds.size() != 1) {
@@ -116,16 +126,59 @@ public class CommissionSettingsService {
         Market market = marketRepository.findByIdAndTenantId(marketIds.getFirst(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("La tienda solicitada no existe o no tienes acceso a ella."));
         market.setUfValue(ufValue);
+        market.setUfManualOverride(true);
         market.setUfUpdatedAt(Instant.now());
         return getMarketSettings(market.getId());
     }
 
     @Transactional
-    public GlobalFinancialSettings updateGlobalCommissionSettings(BigDecimal commissionUfValue, BigDecimal commissionPercentageValue) {
+    public MarketFinancialSettings resetMarketUfToAutomatic() {
+        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.ADMIN_SYSTEM);
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        List<Long> marketIds = accessControlService.currentMarketIds();
+        if (marketIds.size() != 1) {
+            throw new BusinessException("Necesitas una Tienda activa para volver a la UF automatica.");
+        }
+
+        Market market = marketRepository.findByIdAndTenantId(marketIds.getFirst(), tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("La tienda solicitada no existe o no tienes acceso a ella."));
+        market.setUfManualOverride(false);
+        market.setUfValue(ufSyncService.syncMarketUf(market));
+        market.setUfUpdatedAt(Instant.now());
+        return getMarketSettings(market.getId());
+    }
+
+    @Transactional
+    public BigDecimal ensureOperationalUfValue(Market market) {
+        if (market == null) {
+            throw new BusinessException("La venta no tiene una Tienda asociada para calcular la UF.");
+        }
+
+        if (isValidUfValue(market.getUfValue())) {
+            return market.getUfValue();
+        }
+
+        if (market.isUfManualOverride()) {
+            throw new BusinessException("La UF manual configurada para esta Tienda no es valida. Revisala e intenta nuevamente.");
+        }
+
+        try {
+            return ufSyncService.syncMarketUf(market);
+        } catch (RuntimeException exception) {
+            throw new BusinessException("No pudimos sincronizar automaticamente la UF para esta Tienda. Intenta nuevamente en unos minutos o define la UF manualmente.");
+        }
+    }
+
+    @Transactional
+    public GlobalFinancialSettings updateGlobalCommissionSettings(
+            BigDecimal commissionUfValue,
+            BigDecimal commissionPercentageValue,
+            boolean useDynamicFixedCommission) {
         accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM);
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         upsertCommissionRule(tenantId, null, CommissionRuleScope.GLOBAL, CommissionType.FIXED, commissionUfValue);
         upsertCommissionRule(tenantId, null, CommissionRuleScope.GLOBAL, CommissionType.PERCENTAGE, commissionPercentageValue);
+        upsertBooleanSetting(tenantId, USE_DYNAMIC_FIXED_COMMISSION_KEY, useDynamicFixedCommission);
         return getGlobalSettings();
     }
 
@@ -243,6 +296,11 @@ public class CommissionSettingsService {
         return result;
     }
 
+    @Transactional(readOnly = true)
+    public boolean useDynamicFixedCommission() {
+        return useDynamicFixedCommission(currentTenantProvider.getCurrentTenant().getId());
+    }
+
     private BigDecimal getGlobalCommissionUfValue(Long tenantId) {
         return commissionRuleRepository.findByTenantIdAndScopeAndTypeAndMarketIsNullAndStoreIsNull(
                 tenantId,
@@ -259,6 +317,23 @@ public class CommissionSettingsService {
                 CommissionType.PERCENTAGE)
                 .map(CommissionRule::getCommissionValue)
                 .orElse(DEFAULT_COMMISSION_PERCENTAGE);
+    }
+
+    private boolean useDynamicFixedCommission(Long tenantId) {
+        return appSettingRepository.findByTenantIdAndSettingKey(tenantId, USE_DYNAMIC_FIXED_COMMISSION_KEY)
+                .map(AppSetting::getSettingValue)
+                .map(Boolean::parseBoolean)
+                .orElse(true);
+    }
+
+    private void upsertBooleanSetting(Long tenantId, String key, boolean value) {
+        AppSetting setting = appSettingRepository.findByTenantIdAndSettingKey(tenantId, key)
+                .orElseGet(AppSetting::new);
+        setting.setTenant(currentTenantProvider.getCurrentTenant());
+        setting.setSettingKey(key);
+        setting.setSettingValue(Boolean.toString(value));
+        setting.setValueType(AppSettingType.BOOLEAN);
+        appSettingRepository.save(setting);
     }
 
     private void upsertCommissionRule(Long tenantId, Market market, CommissionRuleScope scope, CommissionType type, BigDecimal value) {
@@ -279,6 +354,10 @@ public class CommissionSettingsService {
         commissionRuleRepository.save(rule);
     }
 
+    private boolean isValidUfValue(BigDecimal value) {
+        return value != null && value.compareTo(BigDecimal.ZERO) > 0;
+    }
+
     public record EffectiveCommissionConfig(
             BigDecimal commissionUfValue,
             BigDecimal commissionPercentageValue) {
@@ -287,6 +366,7 @@ public class CommissionSettingsService {
     public record GlobalFinancialSettings(
             BigDecimal currentUfValue,
             LocalDate ufLastUpdatedAt,
+            boolean useDynamicFixedCommission,
             BigDecimal globalCommissionUfValue,
             BigDecimal globalCommissionPercentageValue) {
     }
@@ -296,6 +376,8 @@ public class CommissionSettingsService {
             String marketName,
             BigDecimal ufValue,
             Instant ufUpdatedAt,
+            boolean ufManualOverride,
+            boolean useDynamicFixedCommission,
             boolean overrideEnabled,
             BigDecimal globalCommissionUfValue,
             BigDecimal globalCommissionPercentageValue,

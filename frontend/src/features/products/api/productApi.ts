@@ -90,6 +90,16 @@ export type BarcodeLabelInput = {
   includeCollaboratorName: boolean;
 };
 
+export type ProductImportResult = {
+  successCount: number;
+  errorCount: number;
+  errors: Array<{
+    rowNumber: number;
+    rowData: string;
+    message: string;
+  }>;
+};
+
 export function listProducts(params: ListProductsParams = {}) {
   const search = new URLSearchParams();
   search.set("page", String(params.page ?? 0));
@@ -136,5 +146,15 @@ export function printBarcodeLabels(input: BarcodeLabelInput) {
   return apiFetchBlob("/api/products/barcode-labels", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export function importProductsCsv(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return apiFetch<ProductImportResult>("/api/products/import", {
+    method: "POST",
+    body: formData,
   });
 }

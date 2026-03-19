@@ -7,5 +7,6 @@ import jakarta.validation.constraints.NotNull;
 
 public record GlobalCommissionSettingsRequest(
         @NotNull @DecimalMin("0.00") BigDecimal commissionUfValue,
-        @NotNull @DecimalMin("0.00") BigDecimal commissionPercentageValue) {
+        @NotNull @DecimalMin("0.00") BigDecimal commissionPercentageValue,
+        boolean useDynamicFixedCommission) {
 }

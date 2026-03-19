@@ -4,9 +4,9 @@ const rolePriority: AppRole[] = ["ADMIN_SYSTEM", "ADMIN_MARKET", "STORE_USER", "
 
 const roleLabels: Record<AppRole, string> = {
   ADMIN_SYSTEM: "Administrador General",
-  ADMIN_MARKET: "Administrador de Tienda",
-  STORE_USER: "Colaborador",
-  COLLABORATOR: "Administrador de Tienda",
+  ADMIN_MARKET: "Administrador de Espacio",
+  STORE_USER: "Tienda",
+  COLLABORATOR: "Administrador de Espacio",
 };
 
 const roleBadgeClasses: Record<AppRole, string> = {

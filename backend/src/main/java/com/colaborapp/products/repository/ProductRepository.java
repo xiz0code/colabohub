@@ -55,6 +55,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("""
             select p from Product p
             join fetch p.store s
+            left join fetch p.ownerUser owner
             where p.tenant.id = :tenantId
               and p.status = :status
               and p.barcode = :barcode
@@ -67,6 +68,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("""
             select p from Product p
             join fetch p.store s
+            left join fetch p.ownerUser owner
             where p.tenant.id = :tenantId
               and p.status = :status
               and lower(p.sku) = lower(:sku)
@@ -79,6 +81,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("""
             select p from Product p
             join fetch p.store s
+            left join fetch p.ownerUser owner
             where p.tenant.id = :tenantId
               and p.status = :status
               and lower(p.name) like lower(concat('%', :name, '%'))
@@ -93,6 +96,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("""
             select p from Product p
             join fetch p.store s
+            left join fetch p.ownerUser owner
             where p.tenant.id = :tenantId
               and p.status = :status
               and (

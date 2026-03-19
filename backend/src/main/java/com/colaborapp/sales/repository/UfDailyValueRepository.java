@@ -10,4 +10,6 @@ import com.colaborapp.sales.domain.UfDailyValue;
 public interface UfDailyValueRepository extends JpaRepository<UfDailyValue, Long> {
 
     Optional<UfDailyValue> findByTenantIdAndEffectiveDate(Long tenantId, LocalDate effectiveDate);
+
+    Optional<UfDailyValue> findTopByOrderByEffectiveDateDescIdDesc();
 }

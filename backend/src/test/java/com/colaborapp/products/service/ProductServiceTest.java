@@ -271,6 +271,34 @@ class ProductServiceTest {
     }
 
     @Test
+    void shouldNotCreateDuplicateStockStoreWhenStockStoreAlreadyExists() {
+        ProductCreateRequest request = new ProductCreateRequest(
+                null,
+                7L,
+                "Producto D",
+                "SKU-4",
+                "Desc",
+                new BigDecimal("5000.00"),
+                null,
+                2,
+                null);
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(accessControlService.currentMarketIds()).thenReturn(List.of(14L));
+        when(marketRepository.findByIdAndTenantId(14L, 1L)).thenReturn(Optional.of(market));
+        when(storeRepository.findByMarketIdAndType(14L, StoreType.STOCK)).thenReturn(Optional.of(store));
+        when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
+        when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-4")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000299");
+        when(productRepository.existsByBarcode("7500000000299")).thenReturn(false);
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        productService.createProduct(request);
+
+        verify(storeRepository, never()).save(any(Store.class));
+    }
+
+    @Test
     void shouldCreateAuditTrailWhenUpdatingProduct() {
         Product product = new Product();
         product.setId(20L);

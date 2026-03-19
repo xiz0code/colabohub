@@ -1,5 +1,7 @@
 package com.colaborapp.users.web.dto;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 import com.colaborapp.users.domain.RoleCode;
@@ -14,6 +16,10 @@ public record UserRequest(
         String phone,
         String contactName,
         String description,
+        BigDecimal monthlyRent,
+        LocalDate startDate,
+        String standNumber,
+        Boolean factura,
         @NotNull RoleCode role,
         List<Long> marketIds,
         List<Long> storeIds,

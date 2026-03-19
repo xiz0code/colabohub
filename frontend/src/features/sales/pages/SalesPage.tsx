@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
-import { getSalesTodayDetails } from "@/features/reports/api/reportApi";
 import {
   addPosSaleItem,
   cancelPosSale,
   confirmPosSale,
   createPosSale,
-  getOpenPosSale,
+  getPosSale,
+  listPosSales,
   recalculatePosSale,
   removePosSaleItem,
   scanPosProduct,
@@ -17,6 +17,7 @@ import {
   updatePosSaleItem,
   type PosProduct,
   type PosSale,
+  type PosSaleSummary,
 } from "@/features/sales/api/posApi";
 import { EmptyState } from "@/shared/components/feedback/EmptyState";
 import { FeedbackMessage } from "@/shared/components/feedback/FeedbackMessage";
@@ -32,192 +33,207 @@ type Feedback = {
 export function SalesPage() {
   const queryClient = useQueryClient();
   const { user, primaryRole } = useSession();
-  const [sale, setSale] = useState<PosSale | null>(null);
+  const [activeSale, setActiveSale] = useState<PosSale | null>(null);
+  const [detailSaleId, setDetailSaleId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<PosProduct[]>([]);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [isPosOpen, setIsPosOpen] = useState(true);
+  const [isPosModalOpen, setIsPosModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isPosCloseConfirmOpen, setIsPosCloseConfirmOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [amountReceived, setAmountReceived] = useState("");
+  const [isSearchingProducts, setIsSearchingProducts] = useState(false);
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
 
-  const activeMarketId = user?.marketIds[0] ?? null;
-  const activeMarketName = user?.marketIds.length === 1 ? "tu Tienda asignada" : "la Tienda autenticada";
-  const canOperatePos = primaryRole === "ADMIN_MARKET" && Boolean(activeMarketId);
-  const isOpen = sale?.status === "OPEN";
+  const activeMarketName = user?.activeMarketName ?? "tu Espacio";
+  const canOperatePos = primaryRole === "ADMIN_MARKET" && Boolean(user?.activeMarketId);
 
-  const salesTodayQuery = useQuery({
-    queryKey: ["reports", "sales", "today", "details"],
-    queryFn: getSalesTodayDetails,
+  const salesQuery = useQuery({
+    queryKey: ["pos", "sales"],
+    queryFn: listPosSales,
     enabled: canOperatePos,
   });
 
+  const detailSaleQuery = useQuery({
+    queryKey: ["pos", "sales", detailSaleId],
+    queryFn: () => getPosSale(detailSaleId!),
+    enabled: detailSaleId !== null,
+  });
+
   const syncSale = (nextSale: PosSale, nextFeedback?: Feedback) => {
-    setSale(nextSale);
+    setActiveSale(nextSale);
     setSearch("");
     setSearchResults([]);
+    if (nextSale.paymentMethod !== "CASH") {
+      setAmountReceived("");
+    }
     if (nextFeedback) {
       setFeedback(nextFeedback);
     }
+    queryClient.setQueryData(["pos", "sales", nextSale.id], nextSale);
+    void queryClient.invalidateQueries({ queryKey: ["pos", "sales"] });
     window.requestAnimationFrame(() => scannerInputRef.current?.focus());
   };
 
-  const initializeSale = async () => {
-    if (!canOperatePos) {
-      setSale(null);
-      return;
-    }
+  const openSaleMutation = useMutation({
+    mutationFn: () => createPosSale(),
+    onSuccess: (sale) => {
+      syncSale(sale, {
+        kind: "info",
+        message: "Caja lista. Si ya existia una venta abierta, se reutilizo automaticamente.",
+      });
+      setIsPosModalOpen(true);
+    },
+    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible abrir la caja POS.") }),
+  });
 
-    setIsInitializing(true);
-    setFeedback(null);
-    setSearch("");
-    setSearchResults([]);
-
-    try {
-      const currentOpenSale = await getOpenPosSale();
-      if (currentOpenSale) {
-        setSale(currentOpenSale);
-        setFeedback({ kind: "info", message: "Ya existia una venta abierta para tu Tienda y se reutilizo." });
-        return;
-      }
-
-      const createdSale = await createPosSale();
-      setSale(createdSale);
-      setFeedback({ kind: "success", message: "Caja POS lista para registrar una nueva venta." });
-    } catch (error) {
-      setSale(null);
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible preparar la venta POS.") });
-    } finally {
-      setIsInitializing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!canOperatePos) {
-      return;
-    }
-    void initializeSale();
-  }, [canOperatePos]);
-
-  useEffect(() => {
-    if (isPosOpen && isOpen) {
-      scannerInputRef.current?.focus();
-    }
-  }, [isOpen, isPosOpen, sale?.id]);
+  const openDetailMutation = useMutation({
+    mutationFn: (saleId: number) => getPosSale(saleId),
+    onSuccess: (sale) => {
+      queryClient.setQueryData(["pos", "sales", sale.id], sale);
+      setDetailSaleId(sale.id);
+    },
+    onError: (error) =>
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cargar el detalle de la venta.") }),
+  });
 
   const addItemMutation = useMutation({
     mutationFn: ({ productId, quantity }: { productId: number; quantity: number }) =>
-      addPosSaleItem(sale!.id, productId, quantity),
-    onSuccess: (nextSale) => syncSale(nextSale, { kind: "success", message: "Producto agregado a la venta." }),
+      addPosSaleItem(activeSale!.id, productId, quantity),
+    onSuccess: (sale) => syncSale(sale, { kind: "success", message: "Producto agregado a la venta." }),
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible agregar el producto.") }),
   });
 
   const updateItemMutation = useMutation({
     mutationFn: ({ itemId, quantity }: { itemId: number; quantity: number }) =>
-      updatePosSaleItem(sale!.id, itemId, quantity),
-    onSuccess: (nextSale) => syncSale(nextSale),
+      updatePosSaleItem(activeSale!.id, itemId, quantity),
+    onSuccess: (sale) => syncSale(sale),
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar la cantidad.") }),
   });
 
   const removeItemMutation = useMutation({
-    mutationFn: (itemId: number) => removePosSaleItem(sale!.id, itemId),
-    onSuccess: (nextSale) => syncSale(nextSale, { kind: "success", message: "Producto eliminado de la venta." }),
+    mutationFn: (itemId: number) => removePosSaleItem(activeSale!.id, itemId),
+    onSuccess: (sale) => syncSale(sale, { kind: "success", message: "Producto quitado de la venta." }),
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible quitar el producto.") }),
   });
 
   const paymentMethodMutation = useMutation({
-    mutationFn: (paymentMethod: PosSale["paymentMethod"]) => updatePosPaymentMethod(sale!.id, paymentMethod),
-    onSuccess: (nextSale) => syncSale(nextSale, { kind: "success", message: "Medio de pago actualizado." }),
-    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar el medio de pago.") }),
+    mutationFn: (paymentMethod: PosSale["paymentMethod"]) => updatePosPaymentMethod(activeSale!.id, paymentMethod),
+    onSuccess: (sale) => syncSale(sale, { kind: "success", message: "Medio de pago actualizado." }),
+    onError: (error) =>
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar el medio de pago.") }),
   });
 
   const recalculateMutation = useMutation({
-    mutationFn: () => recalculatePosSale(sale!.id),
-    onSuccess: (nextSale) => syncSale(nextSale, { kind: "success", message: "Venta recalculada correctamente." }),
+    mutationFn: () => recalculatePosSale(activeSale!.id),
+    onSuccess: (sale) => syncSale(sale, { kind: "success", message: "Venta recalculada correctamente." }),
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible recalcular la venta.") }),
   });
 
   const confirmMutation = useMutation({
-    mutationFn: () => confirmPosSale(sale!.id),
-    onSuccess: async (nextSale) => {
-      syncSale(nextSale);
+    mutationFn: () => confirmPosSale(activeSale!.id),
+    onSuccess: (sale) => {
+      syncSale(sale, { kind: "success", message: "Venta registrada correctamente" });
       setIsConfirmModalOpen(false);
-      setIsPosOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["reports", "sales", "today", "details"] });
-      setFeedback({ kind: "success", message: "Venta registrada correctamente" });
+      setIsPosModalOpen(false);
     },
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible confirmar la venta.") }),
   });
 
   const cancelMutation = useMutation({
-    mutationFn: () => cancelPosSale(sale!.id),
-    onSuccess: (nextSale) => syncSale(nextSale, { kind: "success", message: "Venta cancelada." }),
-    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cancelar la venta.") }),
-  });
-
-  const reopenMutation = useMutation({
-    mutationFn: async () => {
-      const currentOpenSale = await getOpenPosSale();
-      if (currentOpenSale) {
-        return { sale: currentOpenSale, reused: true };
+    mutationFn: () => cancelPosSale(detailSaleQuery.data?.id ?? activeSale!.id, cancelReason),
+    onSuccess: (sale) => {
+      queryClient.setQueryData(["pos", "sales", sale.id], sale);
+      void queryClient.invalidateQueries({ queryKey: ["pos", "sales"] });
+      if (activeSale?.id === sale.id) {
+        setActiveSale(sale);
       }
-
-      return {
-        sale: await createPosSale(),
-        reused: false,
-      };
+      setIsCancelModalOpen(false);
+      setCancelReason("");
+      setFeedback({ kind: "success", message: "Venta anulada y stock restaurado correctamente." });
     },
-    onSuccess: ({ sale: nextSale, reused }) => {
-      syncSale(nextSale, {
-        kind: reused ? "info" : "success",
-        message: reused ? "Se recupero la venta abierta actual de tu Tienda." : "Nueva venta abierta para tu Tienda.",
-      });
-      setIsPosOpen(true);
-    },
-    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible abrir la caja POS.") }),
+    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible anular la venta.") }),
   });
 
-  const isBusy = useMemo(
-    () =>
-      isInitializing ||
-      addItemMutation.isPending ||
-      updateItemMutation.isPending ||
-      removeItemMutation.isPending ||
-      paymentMethodMutation.isPending ||
-      recalculateMutation.isPending ||
-      confirmMutation.isPending ||
-      cancelMutation.isPending ||
-      reopenMutation.isPending,
-    [
-      addItemMutation.isPending,
-      cancelMutation.isPending,
-      confirmMutation.isPending,
-      isInitializing,
-      paymentMethodMutation.isPending,
-      recalculateMutation.isPending,
-      removeItemMutation.isPending,
-      reopenMutation.isPending,
-      updateItemMutation.isPending,
-    ],
-  );
+  const cancelActiveSaleMutation = useMutation({
+    mutationFn: () => cancelPosSale(activeSale!.id, "Venta cancelada desde la caja POS."),
+    onSuccess: (sale) => {
+      queryClient.setQueryData(["pos", "sales", sale.id], sale);
+      void queryClient.invalidateQueries({ queryKey: ["pos", "sales"] });
+      setActiveSale(sale);
+      setIsPosCloseConfirmOpen(false);
+      setIsPosModalOpen(false);
+      setFeedback({ kind: "success", message: "Venta cancelada correctamente desde la caja." });
+    },
+    onError: (error) => {
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible cancelar la venta desde la caja.") });
+    },
+  });
+
+  const isPosBusy =
+    openSaleMutation.isPending ||
+    addItemMutation.isPending ||
+    updateItemMutation.isPending ||
+    removeItemMutation.isPending ||
+    paymentMethodMutation.isPending ||
+    recalculateMutation.isPending ||
+    confirmMutation.isPending ||
+    cancelActiveSaleMutation.isPending;
+
+  const saleForDetail = detailSaleQuery.data ?? (activeSale?.id === detailSaleId ? activeSale : null);
+  const isOpen = activeSale?.status === "OPEN";
+  const amountReceivedValue = Number(amountReceived);
+  const isCashPayment = activeSale?.paymentMethod === "CASH";
+  const changeAmount = isCashPayment && Number.isFinite(amountReceivedValue) ? Math.max(amountReceivedValue - (activeSale?.totalAmount ?? 0), 0) : 0;
+  const isCashAmountInsufficient =
+    isCashPayment && amountReceived.trim().length > 0 && Number.isFinite(amountReceivedValue) && amountReceivedValue < (activeSale?.totalAmount ?? 0);
 
   const commissionUfAmount = useMemo(
-    () => sale?.storeSummaries.reduce((total, summary) => total + summary.commission1Amount, 0) ?? 0,
-    [sale?.storeSummaries],
+    () => activeSale?.items.reduce((total, item) => total + item.commission1Amount, 0) ?? 0,
+    [activeSale?.items],
   );
   const commissionPercentageAmount = useMemo(
-    () => sale?.storeSummaries.reduce((total, summary) => total + summary.commission2Amount, 0) ?? 0,
-    [sale?.storeSummaries],
+    () => activeSale?.items.reduce((total, item) => total + item.commission2Amount, 0) ?? 0,
+    [activeSale?.items],
   );
 
-  const handleResolveAndAdd = async () => {
-    const normalizedQuery = search.trim();
-    if (!sale || !isOpen || normalizedQuery.length === 0) {
+  useEffect(() => {
+    if (!isPosModalOpen || !isOpen) {
       return;
     }
 
-    setFeedback(null);
+    const normalizedQuery = search.trim();
+    if (normalizedQuery.length < 2) {
+      setSearchResults([]);
+      setIsSearchingProducts(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setIsSearchingProducts(true);
+        const matches = await searchPosProducts(normalizedQuery);
+        setSearchResults(matches);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setIsSearchingProducts(false);
+      }
+    }, 220);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isOpen, isPosModalOpen, search]);
+
+  const handleResolveAndAdd = async () => {
+    const normalizedQuery = search.trim();
+    if (!activeSale || !isOpen || normalizedQuery.length === 0) {
+      return;
+    }
+
     setSearchResults([]);
+    setFeedback(null);
 
     try {
       const scannedProduct = await scanPosProduct(normalizedQuery);
@@ -239,15 +255,29 @@ export function SalesPage() {
       }
 
       if (matches.length === 0) {
-        setFeedback({ kind: "error", message: "No se encontraron productos activos con esa busqueda." });
+        setFeedback({ kind: "error", message: "No encontramos productos activos con esa busqueda." });
         return;
       }
 
       setSearchResults(matches);
-      setFeedback({ kind: "info", message: "Selecciona uno de los productos encontrados para agregarlo." });
+      setFeedback({ kind: "info", message: "Selecciona un producto para agregarlo a la venta." });
     } catch (error) {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible buscar productos POS.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible buscar productos.") });
     }
+  };
+
+  const handlePosCloseRequest = () => {
+    if (!activeSale) {
+      setIsPosModalOpen(false);
+      return;
+    }
+
+    if (activeSale.status !== "OPEN" || activeSale.items.length === 0) {
+      setIsPosModalOpen(false);
+      return;
+    }
+
+    setIsPosCloseConfirmOpen(true);
   };
 
   if (!canOperatePos) {
@@ -255,12 +285,12 @@ export function SalesPage() {
       <section>
         <PageHeader
           title="Ventas"
-          description="El POS operativo esta disponible solo para Administradores de Tienda con una Tienda autenticada."
+          description="El POS esta disponible solo para Administradores de Espacio con un Espacio activo."
         />
         <div className="soft-surface p-8">
           <EmptyState
             title="No tienes acceso operativo al POS"
-            description="Esta seccion se habilita cuando existe una Tienda autenticada para operar ventas."
+            description="Solicita acceso como Administrador de Espacio si necesitas registrar ventas."
           />
         </div>
       </section>
@@ -271,371 +301,382 @@ export function SalesPage() {
     <section className="space-y-6">
       <PageHeader
         title="Ventas"
-        description="Opera tu caja con una sola venta abierta por Tienda, total claro para cobrar y seguimiento diario inmediato."
-        eyebrow="Caja POS"
+        description="Administra tu caja, revisa el historial y anula ventas confirmadas con trazabilidad completa."
+        eyebrow="POS SaaS"
+        actions={
+          <button
+            type="button"
+            onClick={() => openSaleMutation.mutate()}
+            disabled={openSaleMutation.isPending}
+            className="rounded-[20px] bg-[linear-gradient(135deg,rgba(163,128,255,0.95),rgba(255,153,194,0.92))] px-6 py-3 text-sm font-semibold text-white shadow-[0_16px_30px_rgba(179,146,225,0.28)] transition hover:scale-[1.03] disabled:opacity-50"
+          >
+            {openSaleMutation.isPending ? "Preparando venta..." : "Nueva venta"}
+          </button>
+        }
       />
 
-      {feedback ? <FeedbackMessage kind={feedback.kind} message={feedback.message} /> : null}
+      {feedback ? (
+        <div className="fixed right-6 top-24 z-40 max-w-md">
+          <FeedbackMessage kind={feedback.kind} message={feedback.message} />
+        </div>
+      ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-        <div className="soft-surface p-6">
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Caja autenticada</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight">POS de {activeMarketName}</h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                La Tienda se resuelve automaticamente desde tu sesion. No necesitas seleccionarla manualmente.
-              </p>
-            </div>
-
-            <div className="soft-subtle-surface grid gap-3 p-4 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Venta activa</span>
-                <span className="font-medium">{sale?.saleNumber ?? "Sin venta abierta"}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Estado</span>
-                <span className="font-medium">{sale?.status ?? "Pendiente"}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Medio de pago</span>
-                <span className="font-medium">{sale?.paymentMethod ?? "Sin definir"}</span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (sale) {
-                  setIsPosOpen(true);
-                  return;
-                }
-                reopenMutation.mutate();
-              }}
-              disabled={isBusy}
-              className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-            >
-              {reopenMutation.isPending ? "Abriendo caja..." : sale ? "Abrir caja POS" : "Abrir o recuperar venta"}
-            </button>
+      <div className="soft-surface p-6">
+        <div className="flex flex-col gap-3 border-b border-border/60 pb-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-foreground">Ventas de {activeMarketName}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Cada nueva venta abre o reutiliza automaticamente la venta en curso de tu Espacio.
+            </p>
+          </div>
+          <div className="soft-subtle-surface rounded-[22px] px-4 py-3 text-sm">
+            <span className="text-muted-foreground">Ventas visibles: </span>
+            <span className="font-semibold text-foreground">{salesQuery.data?.length ?? 0}</span>
           </div>
         </div>
 
-        <div className="soft-surface p-6">
-          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Ventas registradas hoy</h2>
-              <p className="text-sm text-muted-foreground">Se actualizan automaticamente cuando confirmas una venta.</p>
-            </div>
-            {salesTodayQuery.data ? <span className="soft-chip">{salesTodayQuery.data.salesCount} venta(s)</span> : null}
+        {salesQuery.isLoading ? <div className="mt-5"><FeedbackMessage kind="info" message="Cargando historial de ventas..." /></div> : null}
+        {salesQuery.isError ? (
+          <div className="mt-5">
+            <FeedbackMessage kind="error" message={getErrorMessage(salesQuery.error, "No fue posible cargar las ventas.")} />
           </div>
+        ) : null}
 
-          {salesTodayQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando ventas del dia..." /> : null}
-          {salesTodayQuery.isError ? (
-            <FeedbackMessage
-              kind="error"
-              message={getErrorMessage(salesTodayQuery.error, "No fue posible cargar las ventas del dia.")}
-            />
-          ) : null}
-
-          {salesTodayQuery.data?.sales.length ? (
-            <div className="soft-table mt-4">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Venta</th>
-                    <th>Hora</th>
-                    <th>Total</th>
-                    <th>Comision</th>
-                    <th>Neto</th>
+        {salesQuery.data && salesQuery.data.length > 0 ? (
+          <div className="soft-table mt-6">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Estado</th>
+                  <th>Neto</th>
+                  <th>IVA</th>
+                  <th>Total</th>
+                  <th>Metodo pago</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {salesQuery.data.map((sale) => (
+                  <tr key={sale.id}>
+                    <td>
+                      <p className="font-medium">{formatDateTime(sale.dateTime)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {sale.saleNumber}
+                        {sale.sellerName ? ` | ${sale.sellerName}` : ""}
+                      </p>
+                    </td>
+                    <td><StatusBadge status={sale.status} /></td>
+                    <td>{formatMoney(sale.netAmount)}</td>
+                    <td>{formatMoney(sale.ivaAmount)}</td>
+                    <td className="font-semibold">{formatMoney(sale.totalAmount)}</td>
+                    <td>{formatPaymentMethodLabel(sale.paymentMethod)}</td>
+                    <td>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openDetailMutation.mutate(sale.id)}
+                          className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold"
+                        >
+                          Ver detalle
+                        </button>
+                        {sale.status === "CONFIRMED" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDetailMutation.mutate(sale.id, {
+                                onSuccess: () => setIsCancelModalOpen(true),
+                              })
+                            }
+                            className="rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700"
+                          >
+                            Anular venta
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {salesTodayQuery.data.sales.map((dailySale) => (
-                    <tr key={dailySale.saleId}>
-                      <td className="font-medium">{dailySale.saleNumber}</td>
-                      <td>{formatDateTime(dailySale.confirmedAt)}</td>
-                      <td>{formatMoney(dailySale.totalAmount)}</td>
-                      <td>{formatMoney(dailySale.totalCommissionAmount)}</td>
-                      <td>{formatMoney(dailySale.totalNetAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          !salesQuery.isLoading && (
+            <div className="mt-6">
+              <EmptyState
+                title="Todavia no hay ventas registradas"
+                description="Abre una nueva venta para comenzar a cobrar y el historial aparecera aqui."
+              />
             </div>
-          ) : (
-            !salesTodayQuery.isLoading && (
-              <div className="mt-4">
-                <EmptyState
-                  title="Aun no hay ventas confirmadas"
-                  description="Cuando registres una venta desde la caja, aparecera aqui automaticamente."
-                />
-              </div>
-            )
-          )}
-        </div>
+          )
+        )}
       </div>
 
       <Modal
-        open={isPosOpen}
+        open={isPosModalOpen}
+        onClose={handlePosCloseRequest}
         title="Caja POS"
-        description="Registra productos, revisa el total a cobrar y confirma la venta solo cuando estes listo."
-        onClose={() => {
-          setIsPosOpen(false);
-          setIsConfirmModalOpen(false);
-        }}
+        description="La venta se prepara automaticamente para que puedas cobrar sin pasos extra."
+        maxWidthClassName="max-w-6xl"
       >
-        {isInitializing ? (
+        {!activeSale ? (
           <FeedbackMessage kind="info" message="Preparando la caja POS..." />
-        ) : !sale ? (
-          <EmptyState
-            title="No hay una venta disponible"
-            description="Abre o recupera una venta para comenzar a cobrar."
-          />
         ) : (
-          <div className="grid gap-6 xl:grid-cols-[330px_1fr]">
+          <div className="grid gap-6 xl:grid-cols-[1.15fr_0.95fr]">
             <div className="space-y-5">
-              <div className="rounded-[30px] border border-violet-100 bg-[linear-gradient(180deg,rgba(255,248,252,0.98),rgba(246,243,255,0.96))] p-5 shadow-[0_18px_45px_rgba(186,168,223,0.15)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-violet-500">Total a cobrar</p>
-                <p className="mt-4 text-5xl font-black tracking-tight text-slate-900">{formatMoney(sale.totalAmount)}</p>
-                <div className="mt-5 grid gap-2 text-sm">
-                  <BreakdownRow label="Subtotal" value={formatMoney(sale.subtotalAmount)} />
-                  <BreakdownRow
-                    label={`Comision UF${sale.commissionUfValue !== null ? ` (${formatUfRate(sale.commissionUfValue)})` : ""}`}
-                    value={formatMoney(commissionUfAmount)}
-                  />
-                  <BreakdownRow
-                    label={`Comision %${sale.commissionPercentageValue !== null ? ` (${formatPercentageRate(sale.commissionPercentageValue)})` : ""}`}
-                    value={formatMoney(commissionPercentageAmount)}
-                  />
+              <div className="soft-subtle-surface overflow-hidden p-0">
+                <div className="border-b border-border/60 bg-[linear-gradient(135deg,rgba(255,248,252,0.92),rgba(244,241,255,0.98))] px-5 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.28em] text-violet-500">Caja activa</p>
+                      <h2 className="mt-2 text-xl font-semibold text-foreground">{activeSale.saleNumber}</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">Lista para cobrar en {activeMarketName}</p>
+                    </div>
+                    <StatusBadge status={activeSale.status} />
+                  </div>
                 </div>
-              </div>
 
-              {!isOpen ? (
-                <FeedbackMessage kind="info" message="Esta venta es inmutable. Abre o recupera una nueva para seguir operando." />
-              ) : null}
+                <div className="space-y-4 p-5">
+                  {!isOpen ? (
+                    <FeedbackMessage kind="info" message="Esta venta ya no se puede editar. Abre una nueva para seguir cobrando." />
+                  ) : null}
 
-              <div className="soft-subtle-surface grid gap-4 p-4">
-                <label className="grid gap-2 text-sm">
-                  <span>Buscar por barcode, SKU o nombre</span>
-                  <div className="flex gap-2">
-                    <input
-                      ref={scannerInputRef}
-                      autoFocus
-                      value={search}
-                      disabled={!isOpen}
-                      onChange={(event) => setSearch(event.target.value)}
+                  <label className="grid gap-2 text-sm">
+                    <span className="font-medium text-foreground">Escanear o buscar producto</span>
+                    <div className="flex gap-2">
+                      <input
+                        ref={scannerInputRef}
+                        value={search}
+                        autoFocus
+                        disabled={!isOpen}
+                        onChange={(event) => setSearch(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
+                          if (searchResults.length > 0) {
+                            addItemMutation.mutate({ productId: searchResults[0].id, quantity: 1 });
+                            return;
+                          }
                           void handleResolveAndAdd();
                         }
                       }}
-                      className="flex-1 rounded-2xl border border-input bg-background px-3 py-2"
-                      placeholder="Escanear o buscar producto"
-                    />
+                        className="flex-1 rounded-2xl border border-input bg-background px-4 py-3"
+                        placeholder="Busca por nombre, SKU o codigo de barras"
+                      />
                     <button
                       type="button"
-                      disabled={!isOpen || isBusy || search.trim().length === 0}
-                      onClick={() => void handleResolveAndAdd()}
-                      className="rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-                    >
-                      {addItemMutation.isPending ? "Agregando..." : "Agregar"}
+                        onClick={() => void handleResolveAndAdd()}
+                        disabled={!isOpen || isPosBusy || search.trim().length === 0}
+                        className="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                      >
+                        {addItemMutation.isPending ? "Agregando..." : "Agregar"}
                     </button>
                   </div>
                 </label>
 
+                <div className="rounded-[24px] border border-dashed border-violet-200/80 bg-violet-50/40 px-4 py-3 text-sm text-muted-foreground">
+                    El lector esta listo para trabajar con codigo de barras, SKU o nombre. Presiona Enter para agregar el primer resultado.
+                  </div>
+                </div>
+              </div>
+
+              <div className="soft-subtle-surface p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">Productos para agregar</h3>
+                    <p className="text-sm text-muted-foreground">Selecciona un resultado o escanea directamente desde la caja.</p>
+                  </div>
+                  <span className="rounded-full bg-secondary/70 px-3 py-1 text-xs font-semibold text-muted-foreground">
+                    {isSearchingProducts ? "Buscando..." : `${searchResults.length} resultado${searchResults.length === 1 ? "" : "s"}`}
+                  </span>
+                </div>
+
+                {searchResults.length > 0 ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {searchResults.map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => addItemMutation.mutate({ productId: product.id, quantity: 1 })}
+                        disabled={!isOpen || isPosBusy}
+                        className="rounded-[24px] border border-border/70 bg-background px-4 py-4 text-left shadow-[0_12px_24px_rgba(196,188,222,0.08)] transition hover:-translate-y-0.5 hover:bg-secondary/40 disabled:opacity-50"
+                      >
+                        <p className="font-semibold text-foreground">{product.name}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">Tienda: {product.collaboratorName}</p>
+                        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                          <span>SKU: {product.sku}</span>
+                          <span>Stock: {product.stock}</span>
+                        </div>
+                        <p className="mt-3 text-base font-semibold text-slate-900">{formatMoney(product.salePrice)}</p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4">
+                    <EmptyState
+                      title="Tu caja esta lista para recibir productos"
+                      description="Escribe un nombre, SKU o codigo de barras para comenzar a armar la venta."
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-5">
+              <div className="rounded-[30px] border border-violet-100 bg-[linear-gradient(180deg,rgba(255,248,252,0.98),rgba(246,243,255,0.96))] p-6 shadow-[0_18px_45px_rgba(186,168,223,0.15)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-violet-500">TOTAL A COBRAR</p>
+                <p className="mt-4 text-5xl font-black tracking-tight text-slate-900">{formatMoney(activeSale.totalAmount)}</p>
+                <div className="mt-6 grid gap-2 text-sm">
+                  <BreakdownRow label="Neto" value={formatMoney(activeSale.netAmount)} />
+                  <BreakdownRow label="IVA" value={formatMoney(activeSale.ivaAmount)} />
+                  <BreakdownRow label="Subtotal" value={formatMoney(activeSale.subtotalAmount)} />
+                  <BreakdownRow label="Comision fija" value={formatMoney(commissionUfAmount)} />
+                  <BreakdownRow label="Comision variable" value={formatMoney(commissionPercentageAmount)} />
+                </div>
+              </div>
+
+              <div className="soft-subtle-surface p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">Carrito</h3>
+                    <p className="text-sm text-muted-foreground">Ajusta cantidades, elimina productos y valida el cobro.</p>
+                  </div>
+                  <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                    {activeSale.items.reduce((total, item) => total + item.quantity, 0)} producto{activeSale.items.reduce((total, item) => total + item.quantity, 0) === 1 ? "" : "s"}
+                  </span>
+                </div>
+
+                {activeSale.items.length === 0 ? (
+                  <div className="mt-4">
+                    <EmptyState
+                      title="Aun no agregas productos"
+                      description="Escanea o busca un producto para comenzar la venta."
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {activeSale.items.map((item) => (
+                      <article key={item.id} className="rounded-[24px] border border-border/70 bg-background px-4 py-4 shadow-[0_10px_22px_rgba(196,188,222,0.08)]">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-foreground">{item.productName}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{item.collaboratorName ?? "Sin Tienda"}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {item.promotionApplied ? item.appliedPromotionName ?? "Promocion aplicada" : "Sin promocion"}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeItemMutation.mutate(item.id)}
+                            disabled={!isOpen || isPosBusy}
+                            className="rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 disabled:opacity-50"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                          <div className="inline-flex items-center rounded-full border border-border bg-secondary/40 p-1">
+                            <button
+                              type="button"
+                              aria-label={`Disminuir cantidad de ${item.productName}`}
+                              onClick={() => {
+                                if (item.quantity > 1) {
+                                  updateItemMutation.mutate({ itemId: item.id, quantity: item.quantity - 1 });
+                                }
+                              }}
+                              disabled={!isOpen || isPosBusy || item.quantity <= 1}
+                              className="rounded-full px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-40"
+                            >
+                              -
+                            </button>
+                            <span className="min-w-10 text-center text-sm font-semibold text-foreground">{item.quantity}</span>
+                            <button
+                              type="button"
+                              aria-label={`Aumentar cantidad de ${item.productName}`}
+                              onClick={() => updateItemMutation.mutate({ itemId: item.id, quantity: item.quantity + 1 })}
+                              disabled={!isOpen || isPosBusy}
+                              className="rounded-full px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-40"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <div className="text-right">
+                            <p className="text-xs text-muted-foreground">Precio unitario</p>
+                            <p className="font-medium text-foreground">{formatMoney(item.baseUnitPrice)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-muted-foreground">Total cliente</p>
+                            <p className="text-lg font-semibold text-slate-900">{formatMoney(item.totalClientAmount)}</p>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="soft-subtle-surface space-y-4 p-5">
                 <label className="grid gap-2 text-sm">
-                  <span>Medio de pago</span>
+                  <span className="font-medium text-foreground">Metodo de pago</span>
                   <select
-                    value={sale.paymentMethod}
-                    disabled={!isOpen || isBusy}
+                    value={activeSale.paymentMethod}
+                    disabled={!isOpen || isPosBusy}
                     onChange={(event) => paymentMethodMutation.mutate(event.target.value as PosSale["paymentMethod"])}
-                    className="rounded-2xl border border-input bg-background px-3 py-2"
+                    className="rounded-2xl border border-input bg-background px-4 py-3"
                   >
                     <option value="CASH">Efectivo</option>
-                    <option value="CREDIT">Credito</option>
                     <option value="DEBITO">Debito</option>
+                    <option value="CREDIT">Credito</option>
                     <option value="TRANSFER">Transferencia</option>
                   </select>
                 </label>
 
-                {sale.paymentMethod === "DEBITO" && sale.ufValue !== null ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    UF aplicada en esta venta: {formatUfValue(sale.ufValue)}
+                {isCashPayment ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="grid gap-2 text-sm">
+                      <span className="font-medium text-foreground">Monto recibido</span>
+                      <input
+                        inputMode="numeric"
+                        value={amountReceived}
+                        disabled={!isOpen || isPosBusy}
+                        onChange={(event) => setAmountReceived(event.target.value.replace(/[^\d]/g, ""))}
+                        className="rounded-2xl border border-input bg-background px-4 py-3"
+                        placeholder="Ingresa el efectivo recibido"
+                      />
+                    </label>
+
+                    <div className="rounded-[22px] border border-emerald-100 bg-emerald-50/70 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Vuelto</p>
+                      <p className="mt-2 text-2xl font-black text-emerald-900">{formatMoney(changeAmount)}</p>
+                      {isCashAmountInsufficient ? (
+                        <p className="mt-2 text-xs font-medium text-rose-600">El monto recibido debe cubrir el total a cobrar.</p>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted-foreground">El vuelto se calcula automaticamente al cobrar en efectivo.</p>
+                      )}
+                    </div>
                   </div>
                 ) : null}
 
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    disabled={!isOpen || isBusy}
                     onClick={() => recalculateMutation.mutate()}
+                    disabled={!isOpen || isPosBusy}
                     className="rounded-2xl border border-border px-4 py-3 text-sm font-semibold disabled:opacity-50"
                   >
                     {recalculateMutation.isPending ? "Recalculando..." : "Recalcular"}
                   </button>
                   <button
                     type="button"
-                    disabled={!isOpen || isBusy || sale.items.length === 0}
                     onClick={() => setIsConfirmModalOpen(true)}
-                    className="rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                    disabled={!isOpen || isPosBusy || activeSale.items.length === 0 || isCashAmountInsufficient}
+                    className="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                   >
                     Confirmar venta
                   </button>
-                  <button
-                    type="button"
-                    disabled={!isOpen || isBusy}
-                    onClick={() => cancelMutation.mutate()}
-                    className="rounded-2xl border border-red-200 px-4 py-3 text-sm font-semibold text-red-700 disabled:opacity-50"
-                  >
-                    {cancelMutation.isPending ? "Cancelando..." : "Cancelar venta"}
-                  </button>
                 </div>
-              </div>
-
-              {searchResults.length > 0 ? (
-                <div className="soft-subtle-surface p-4">
-                  <p className="mb-3 text-sm font-medium">Resultados encontrados</p>
-                  <div className="grid gap-2">
-                    {searchResults.map((product) => (
-                      <button
-                        key={product.id}
-                        type="button"
-                        disabled={!isOpen || isBusy}
-                        onClick={() => addItemMutation.mutate({ productId: product.id, quantity: 1 })}
-                        className="rounded-2xl border border-border/70 px-3 py-3 text-left text-sm transition hover:bg-secondary/40 disabled:opacity-50"
-                      >
-                        <p className="font-medium">{product.name}</p>
-                        <p className="text-muted-foreground">
-                          {product.storeName} | SKU: {product.sku} | Barcode: {product.barcode} | Stock: {product.stock}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="space-y-5">
-              <div className="soft-subtle-surface p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">{sale.saleNumber}</h2>
-                    <p className="text-sm text-muted-foreground">Estado actual: {sale.status}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => reopenMutation.mutate()}
-                    disabled={isBusy}
-                    className="rounded-full border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50"
-                  >
-                    {reopenMutation.isPending ? "Abriendo..." : "Nueva venta"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="soft-subtle-surface p-4">
-                <h2 className="text-lg font-semibold">Lineas de la venta</h2>
-                {sale.items.length === 0 ? (
-                  <div className="mt-4">
-                    <EmptyState
-                      title="La venta aun no tiene productos"
-                      description="Escanea o busca un producto para empezar a cobrar."
-                    />
-                  </div>
-                ) : (
-                  <div className="soft-table mt-4">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Producto</th>
-                          <th>Colaborador</th>
-                          <th>Cant.</th>
-                          <th>Precio</th>
-                          <th>Total</th>
-                          <th>Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sale.items.map((item) => (
-                          <tr key={item.id}>
-                            <td>
-                              <p className="font-medium">{item.productName}</p>
-                              <p className="text-muted-foreground">
-                                {item.storeName} | SKU: {item.sku} | Barcode: {item.barcode}
-                              </p>
-                            </td>
-                            <td>{item.collaboratorName ?? "Sin colaborador"}</td>
-                            <td>
-                              <input
-                                min={1}
-                                type="number"
-                                defaultValue={item.quantity}
-                                disabled={!isOpen || isBusy}
-                                onBlur={(event) => {
-                                  const nextQuantity = Number(event.target.value);
-                                  if (Number.isFinite(nextQuantity) && nextQuantity >= 1 && nextQuantity !== item.quantity) {
-                                    updateItemMutation.mutate({ itemId: item.id, quantity: nextQuantity });
-                                  }
-                                }}
-                                className="w-20 rounded-xl border border-input bg-background px-3 py-2"
-                              />
-                            </td>
-                            <td>{formatMoney(item.baseUnitPrice)}</td>
-                            <td>
-                              <p className="font-medium">{formatMoney(item.subtotal)}</p>
-                              {sale.paymentMethod === "DEBITO" ? (
-                                <p className="text-muted-foreground">Neto: {formatMoney(item.netAmount)}</p>
-                              ) : null}
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                disabled={!isOpen || isBusy}
-                                onClick={() => removeItemMutation.mutate(item.id)}
-                                className="rounded-full border border-border px-3 py-1 text-xs disabled:opacity-50"
-                              >
-                                Quitar
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              <div className="soft-subtle-surface p-4">
-                <h2 className="text-lg font-semibold">Resumen por colaborador / Tienda</h2>
-                {sale.storeSummaries.length === 0 ? (
-                  <div className="mt-4">
-                    <EmptyState
-                      title="Sin resumen todavia"
-                      description="El resumen se completara cuando agregues productos a la venta."
-                    />
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-3">
-                    {sale.storeSummaries.map((summary) => (
-                      <article key={summary.storeId} className="rounded-2xl border border-border/70 bg-background/80 p-4 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-semibold">{summary.storeName}</p>
-                          <p className="text-muted-foreground">
-                            {summary.lineCount} linea(s) | {summary.unitCount} unidad(es)
-                          </p>
-                        </div>
-                        <div className="mt-3 grid gap-1">
-                          <span>Subtotal: {formatMoney(summary.subtotalAmount)}</span>
-                          <span>Comision UF: {formatMoney(summary.commission1Amount)}</span>
-                          <span>Comision %: {formatMoney(summary.commission2Amount)}</span>
-                          <span>IVA comision: {formatMoney(summary.commissionIvaAmount)}</span>
-                          <span className="font-medium">Neto tienda: {formatMoney(summary.netAmount)}</span>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -643,12 +684,112 @@ export function SalesPage() {
       </Modal>
 
       <Modal
-        open={isConfirmModalOpen}
-        title="Confirmar venta"
-        description="La venta quedara registrada y luego no podra modificarse."
-        onClose={() => setIsConfirmModalOpen(false)}
+        open={isPosCloseConfirmOpen}
+        onClose={() => setIsPosCloseConfirmOpen(false)}
+        title="Cancelar venta en curso"
+        description="Esta venta sigue abierta. Si la cancelas, quedara anulada y no podras retomarla."
         footer={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setIsPosCloseConfirmOpen(false)}
+              className="rounded-2xl border border-border px-4 py-2 text-sm font-semibold"
+            >
+              Seguir vendiendo
+            </button>
+            <button
+              type="button"
+              onClick={() => cancelActiveSaleMutation.mutate()}
+              disabled={cancelActiveSaleMutation.isPending}
+              className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"
+            >
+              {cancelActiveSaleMutation.isPending ? "Cancelando..." : "Cancelar venta"}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          Si prefieres retomarla despues, elige <span className="font-semibold text-foreground">Seguir vendiendo</span> y manten la venta abierta.
+        </p>
+      </Modal>
+
+      <Modal
+        open={detailSaleId !== null}
+        onClose={() => setDetailSaleId(null)}
+        title={saleForDetail ? `Detalle ${saleForDetail.saleNumber}` : "Detalle de venta"}
+        description="Revisa productos, promociones, comisiones y totales registrados."
+        maxWidthClassName="max-w-6xl"
+      >
+        {detailSaleQuery.isLoading ? (
+          <FeedbackMessage kind="info" message="Cargando detalle de la venta..." />
+        ) : !saleForDetail ? (
+          <EmptyState
+            title="No pudimos cargar esta venta"
+            description="Intenta nuevamente desde el listado principal."
+          />
+        ) : (
+          <div className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-4">
+              <DetailCard label="Estado" value={<StatusBadge status={saleForDetail.status} />} />
+              <DetailCard label="Neto" value={formatMoney(saleForDetail.netAmount)} />
+              <DetailCard label="IVA" value={formatMoney(saleForDetail.ivaAmount)} />
+              <DetailCard label="Total" value={formatMoney(saleForDetail.totalAmount)} />
+            </div>
+
+            {saleForDetail.status === "CANCELLED" ? (
+              <FeedbackMessage
+                kind="info"
+                message={`Venta anulada${saleForDetail.cancelledBy ? ` por ${saleForDetail.cancelledBy}` : ""}${saleForDetail.cancellationReason ? `: ${saleForDetail.cancellationReason}` : "."}`}
+              />
+            ) : null}
+
+            <div className="soft-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Tienda</th>
+                    <th>Cantidad</th>
+                    <th>Precio</th>
+                    <th>Promocion</th>
+                    <th>UF</th>
+                    <th>Comision fija</th>
+                    <th>Comision variable</th>
+                    <th>IVA comision</th>
+                    <th>Total tienda</th>
+                    <th>Total cliente</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {saleForDetail.items.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.productName}</td>
+                      <td>{item.collaboratorName ?? "Sin Tienda"}</td>
+                      <td>{item.quantity}</td>
+                      <td>{formatMoney(item.baseUnitPrice)}</td>
+                      <td>{item.promotionApplied ? item.appliedPromotionName ?? "Si" : "No"}</td>
+                      <td>{item.ufValue !== null ? formatUfValue(item.ufValue) : "No aplica"}</td>
+                      <td>{formatMoney(item.commission1Amount)}</td>
+                      <td>{formatMoney(item.commission2Amount)}</td>
+                      <td>{formatMoney(item.commissionIvaAmount)}</td>
+                      <td>{formatMoney(item.totalCollaboratorAmount)}</td>
+                      <td>{formatMoney(item.totalClientAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={isConfirmModalOpen}
+        onClose={() => setIsConfirmModalOpen(false)}
+        title="Confirmar venta"
+        description="La venta quedara registrada y no se podra editar despues."
+        footer={
+          <div className="flex justify-end gap-3">
             <button
               type="button"
               onClick={() => setIsConfirmModalOpen(false)}
@@ -670,14 +811,64 @@ export function SalesPage() {
         <div className="space-y-4">
           <div className="rounded-[28px] border border-violet-100 bg-[linear-gradient(180deg,rgba(255,248,252,0.98),rgba(246,243,255,0.96))] p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-500">Total a cobrar</p>
-            <p className="mt-3 text-4xl font-black tracking-tight text-slate-900">
-              {sale ? formatMoney(sale.totalAmount) : formatMoney(0)}
-            </p>
+            <p className="mt-3 text-4xl font-black tracking-tight text-slate-900">{formatMoney(activeSale?.totalAmount ?? 0)}</p>
           </div>
           <p className="text-sm text-muted-foreground">Deseas confirmar esta venta?</p>
         </div>
       </Modal>
+
+      <Modal
+        open={isCancelModalOpen}
+        onClose={() => {
+          setIsCancelModalOpen(false);
+          setCancelReason("");
+        }}
+        title="Anular venta"
+        description="La venta quedara anulada, se restaurara el stock y se registrara el motivo."
+        footer={
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setIsCancelModalOpen(false);
+                setCancelReason("");
+              }}
+              className="rounded-2xl border border-border px-4 py-2 text-sm font-semibold"
+            >
+              Volver
+            </button>
+            <button
+              type="button"
+              onClick={() => cancelMutation.mutate()}
+              disabled={cancelMutation.isPending || cancelReason.trim().length === 0}
+              className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"
+            >
+              {cancelMutation.isPending ? "Anulando..." : "Confirmar anulacion"}
+            </button>
+          </div>
+        }
+      >
+        <label className="grid gap-2 text-sm">
+          <span>Motivo de anulacion</span>
+          <textarea
+            value={cancelReason}
+            onChange={(event) => setCancelReason(event.target.value)}
+            rows={4}
+            className="rounded-2xl border border-input bg-background px-3 py-3"
+            placeholder="Describe brevemente por que se anula la venta"
+          />
+        </label>
+      </Modal>
     </section>
+  );
+}
+
+function DetailCard({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <article className="soft-subtle-surface rounded-[24px] p-4">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <div className="mt-2 text-lg font-semibold text-foreground">{value}</div>
+    </article>
   );
 }
 
@@ -688,6 +879,22 @@ function BreakdownRow({ label, value }: { label: string; value: string }) {
       <span className="font-semibold text-slate-900">{value}</span>
     </div>
   );
+}
+
+function StatusBadge({ status }: { status: PosSaleSummary["status"] }) {
+  const styleMap = {
+    OPEN: "bg-violet-50 text-violet-700 border-violet-200",
+    CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    CANCELLED: "bg-rose-50 text-rose-700 border-rose-200",
+  } as const;
+
+  const labelMap = {
+    OPEN: "Abierta",
+    CONFIRMED: "Confirmada",
+    CANCELLED: "Anulada",
+  } as const;
+
+  return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${styleMap[status]}`}>{labelMap[status]}</span>;
 }
 
 function formatMoney(value: number) {
@@ -712,12 +919,19 @@ function formatUfValue(value: number) {
   }).format(value);
 }
 
-function formatUfRate(value: number) {
-  return `${value.toFixed(5).replace(".", ",")} UF`;
-}
+function formatPaymentMethodLabel(paymentMethod: PosSale["paymentMethod"] | null) {
+  if (!paymentMethod) {
+    return "Pendiente";
+  }
 
-function formatPercentageRate(value: number) {
-  return `${(value * 100).toFixed(2).replace(".", ",")}%`;
+  const labelMap = {
+    CASH: "Efectivo",
+    CREDIT: "Credito",
+    DEBITO: "Debito",
+    TRANSFER: "Transferencia",
+  } as const;
+
+  return labelMap[paymentMethod];
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

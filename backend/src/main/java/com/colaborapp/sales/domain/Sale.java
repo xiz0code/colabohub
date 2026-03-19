@@ -74,4 +74,13 @@ public class Sale extends BaseEntity {
 
     @Column
     private Instant confirmedAt;
+
+    @Column
+    private Instant cancelledAt;
+
+    @Column(length = 180)
+    private String cancelledBy;
+
+    @Column(length = 500)
+    private String cancellationReason;
 }

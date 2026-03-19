@@ -3,6 +3,7 @@ import { apiFetch } from "@/shared/lib/api/client";
 export type GlobalFinancialSettings = {
   currentUfValue: number;
   ufLastUpdatedAt: string;
+  useDynamicFixedCommission: boolean;
   commissionUfValue: number;
   commissionPercentageValue: number;
 };
@@ -12,6 +13,8 @@ export type MarketFinancialSettings = {
   marketName: string;
   ufValue: number | null;
   ufUpdatedAt: string | null;
+  ufManualOverride: boolean;
+  useDynamicFixedCommission: boolean;
   overrideEnabled: boolean;
   globalCommissionUfValue: number;
   globalCommissionPercentageValue: number;
@@ -39,10 +42,20 @@ export function updateMarketUfValue(ufValue: number) {
   });
 }
 
-export function updateGlobalCommissionSettings(commissionUfValue: number, commissionPercentageValue: number) {
+export function resetMarketUfValueToAutomatic() {
+  return apiFetch<MarketFinancialSettings>("/api/settings/uf/auto", {
+    method: "PUT",
+  });
+}
+
+export function updateGlobalCommissionSettings(
+  commissionUfValue: number,
+  commissionPercentageValue: number,
+  useDynamicFixedCommission: boolean,
+) {
   return apiFetch<GlobalFinancialSettings>("/api/settings/global/commissions", {
     method: "PATCH",
-    body: JSON.stringify({ commissionUfValue, commissionPercentageValue }),
+    body: JSON.stringify({ commissionUfValue, commissionPercentageValue, useDynamicFixedCommission }),
   });
 }
 

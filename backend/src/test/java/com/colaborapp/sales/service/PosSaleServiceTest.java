@@ -48,8 +48,9 @@ import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
 import com.colaborapp.sales.web.dto.PosPaymentMethodUpdateRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemRequest;
-import com.colaborapp.sales.web.dto.PosSaleResponse;
 import com.colaborapp.sales.web.dto.PosSaleItemUpdateRequest;
+import com.colaborapp.sales.web.dto.PosSaleResponse;
+import com.colaborapp.sales.web.dto.PosSaleSummaryResponse;
 import com.colaborapp.settings.service.CommissionSettingsService;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.stores.domain.StoreStatus;
@@ -157,7 +158,26 @@ class PosSaleServiceTest {
         assertThat(response.status()).isEqualTo(SaleStatus.OPEN);
         assertThat(response.paymentMethod()).isEqualTo(PaymentMethod.CASH);
         assertThat(response.ufValue()).isEqualByComparingTo("36500.00");
+        assertThat(response.marketId()).isEqualTo(marketA.getId());
         assertThat(response.items()).isEmpty();
+    }
+
+    @Test
+    void shouldListSalesWithNetAndIva() {
+        Sale sale = openSale(88L);
+        sale.setMarket(marketA);
+        sale.setTotalAmount(new BigDecimal("11900.00"));
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(1L, marketA.getId()))
+                .thenReturn(List.of(sale));
+
+        List<PosSaleSummaryResponse> response = posSaleService.listSales();
+
+        assertThat(response).hasSize(1);
+        assertThat(response.getFirst().marketId()).isEqualTo(marketA.getId());
+        assertThat(response.getFirst().ivaAmount()).isPositive();
+        assertThat(response.getFirst().paymentMethod()).isEqualTo(PaymentMethod.CASH);
     }
 
     @Test
@@ -376,16 +396,19 @@ class PosSaleServiceTest {
     }
 
     @Test
-    void shouldCancelOpenSale() {
+    void shouldCancelOpenSaleWithoutRestoringStock() {
         Sale sale = openSale(1L);
+        SaleItem item = saleItem(sale, productAna, 1, "12000.00");
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
-        when(saleItemRepository.findAllBySaleIdWithDetails(1L)).thenReturn(List.of());
+        when(saleItemRepository.findAllBySaleIdWithDetails(1L)).thenReturn(List.of(item));
         when(saleStoreSummaryRepository.findAllBySaleIdWithStore(1L)).thenReturn(List.of());
+        when(productRepository.findAllByTenantIdAndIdInForUpdate(1L, List.of(productAna.getId()))).thenReturn(List.of(productAna));
 
-        PosSaleResponse response = posSaleService.cancel(1L);
+        PosSaleResponse response = posSaleService.cancel(1L, "Cliente se arrepintio");
 
         assertThat(response.status()).isEqualTo(SaleStatus.CANCELLED);
+        assertThat(productAna.getStock()).isEqualTo(10);
         verify(stockMovementRepository, never()).save(any());
     }
 
@@ -403,16 +426,31 @@ class PosSaleServiceTest {
         when(saleStoreSummaryRepository.findAllBySaleIdWithStore(1L)).thenReturn(List.of());
         when(productRepository.findAllByTenantIdAndIdInForUpdate(1L, List.of(productAna.getId()))).thenReturn(List.of(productAna));
 
-        PosSaleResponse response = posSaleService.cancel(1L);
+        PosSaleResponse response = posSaleService.cancel(1L, "Cliente solicito anulacion");
 
         assertThat(response.status()).isEqualTo(SaleStatus.CANCELLED);
         assertThat(productAna.getStock()).isEqualTo(10);
+        assertThat(response.cancellationReason()).isEqualTo("Cliente solicito anulacion");
+        assertThat(response.cancelledBy()).isEqualTo("admin.tienda@colaborapp.cl");
 
         ArgumentCaptor<StockMovement> movementCaptor = ArgumentCaptor.forClass(StockMovement.class);
         verify(stockMovementRepository).save(movementCaptor.capture());
         assertThat(movementCaptor.getValue().getType()).isEqualTo(StockMovementType.ADJUSTMENT);
         assertThat(movementCaptor.getValue().getQuantity()).isEqualTo(2);
         assertThat(movementCaptor.getValue().getReferenceType()).isEqualTo("SALE_CANCEL");
+    }
+
+    @Test
+    void shouldRequireReasonToCancelConfirmedSale() {
+        Sale sale = openSale(1L);
+        sale.setStatus(SaleStatus.CONFIRMED);
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
+
+        assertThatThrownBy(() -> posSaleService.cancel(1L, " "))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Ingresa un motivo para anular la venta.");
     }
 
     @Test
@@ -440,8 +478,58 @@ class PosSaleServiceTest {
     }
 
     @Test
+    void shouldRecoverAutomaticUfWhenDebitSaleNeedsIt() {
+        Sale sale = openSale(31L);
+        sale.setMarket(marketA);
+        sale.setUfValue(null);
+        sale.setPaymentMethod(PaymentMethod.CASH);
+        SaleItem item = saleItem(sale, productAna, 1, "12000.00");
+        SaleStoreSummary summary = summary(sale, storeAna, 1, 1, "12000.00", "175.00", "11825.00");
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(31L, 1L)).thenReturn(Optional.of(sale));
+        when(saleItemRepository.findAllBySaleIdWithDetails(31L)).thenReturn(List.of(item));
+        when(commissionSettingsService.ensureOperationalUfValue(marketA)).thenReturn(new BigDecimal("38999.00"));
+        when(posPricingService.calculateSalePricing(any(), eq(PaymentMethod.DEBITO), eq(new BigDecimal("38999.00"))))
+                .thenReturn(new PosPricingService.RecalculationResult(
+                        new BigDecimal("12000.00"),
+                        BigDecimal.ZERO.setScale(2),
+                        new BigDecimal("12000.00"),
+                        new BigDecimal("175"),
+                        new BigDecimal("11825.00"),
+                        List.of(summary)));
+        when(saleStoreSummaryRepository.findAllBySaleIdWithStore(31L)).thenReturn(List.of());
+        when(saleStoreSummaryRepository.findBySaleIdAndStoreId(31L, storeAna.getId())).thenReturn(Optional.empty());
+
+        PosSaleResponse response = posSaleService.updatePaymentMethod(31L, new PosPaymentMethodUpdateRequest(PaymentMethod.DEBITO));
+
+        assertThat(response.paymentMethod()).isEqualTo(PaymentMethod.DEBITO);
+        assertThat(response.ufValue()).isEqualByComparingTo("38999.00");
+        assertThat(sale.getUfValue()).isEqualByComparingTo("38999.00");
+    }
+
+    @Test
+    void shouldFailDebitSaleWhenAutomaticUfCannotBeRecovered() {
+        Sale sale = openSale(32L);
+        sale.setMarket(marketA);
+        sale.setUfValue(null);
+        SaleItem item = saleItem(sale, productAna, 1, "12000.00");
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(32L, 1L)).thenReturn(Optional.of(sale));
+        when(saleItemRepository.findAllBySaleIdWithDetails(32L)).thenReturn(List.of(item));
+        when(commissionSettingsService.ensureOperationalUfValue(marketA))
+                .thenThrow(new BusinessException("No pudimos sincronizar automaticamente la UF para esta Tienda. Intenta nuevamente en unos minutos o define la UF manualmente."));
+
+        assertThatThrownBy(() -> posSaleService.updatePaymentMethod(32L, new PosPaymentMethodUpdateRequest(PaymentMethod.DEBITO)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("No pudimos sincronizar automaticamente la UF para esta Tienda. Intenta nuevamente en unos minutos o define la UF manualmente.");
+    }
+
+    @Test
     void shouldReturnCurrentOpenSale() {
         Sale sale = openSale(20L);
+        sale.setMarket(marketA);
         SaleItem item = saleItem(sale, productAna, 1, "12000.00");
         SaleStoreSummary summary = summary(sale, storeAna, 1, 1, "12000.00", "0.00", "12000.00");
 
@@ -540,7 +628,7 @@ class PosSaleServiceTest {
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(saleRepository.findByIdAndTenantId(72L, 1L)).thenReturn(Optional.of(sale));
 
-        assertThatThrownBy(() -> posSaleService.cancel(72L))
+        assertThatThrownBy(() -> posSaleService.cancel(72L, "Duplicado"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("Sale is already cancelled.");
     }
@@ -648,6 +736,9 @@ class PosSaleServiceTest {
         return new AuthenticatedUserService.CurrentAuthenticatedUser(
                 user,
                 List.of(RoleCode.ADMIN_MARKET.name()),
+                true,
+                marketA.getId(),
+                marketA.getName(),
                 List.of(marketA.getId()),
                 List.of(),
                 List.of(marketA.getName()));

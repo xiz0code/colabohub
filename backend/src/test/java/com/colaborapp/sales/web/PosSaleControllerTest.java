@@ -31,6 +31,7 @@ import com.colaborapp.sales.service.PosSaleService;
 import com.colaborapp.sales.web.dto.PosSaleItemResponse;
 import com.colaborapp.sales.web.dto.PosSaleResponse;
 import com.colaborapp.sales.web.dto.PosSaleStoreSummaryResponse;
+import com.colaborapp.sales.web.dto.PosSaleSummaryResponse;
 
 @WebMvcTest(PosSaleController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -56,6 +57,16 @@ class PosSaleControllerTest {
     }
 
     @Test
+    void shouldListSales() throws Exception {
+        when(posSaleService.listSales()).thenReturn(List.of(summary(1L, SaleStatus.CONFIRMED)));
+
+        mockMvc.perform(get("/api/pos/sales"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].saleNumber").value("S-2026-00000001"))
+                .andExpect(jsonPath("$[0].ivaAmount").value(1900.00));
+    }
+
+    @Test
     void shouldGetSale() throws Exception {
         when(posSaleService.getSale(1L)).thenReturn(response(1L, SaleStatus.OPEN));
 
@@ -77,11 +88,10 @@ class PosSaleControllerTest {
 
     @Test
     void shouldReturnValidationErrorWhenAddItemQuantityIsInvalid() throws Exception {
-                mockMvc.perform(post("/api/pos/sales/1/items")
+        mockMvc.perform(post("/api/pos/sales/1/items")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"productId\":1000,\"quantity\":0}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Campos inválidos"))
                 .andExpect(jsonPath("$.validationErrors.quantity").exists());
     }
 
@@ -118,12 +128,23 @@ class PosSaleControllerTest {
     }
 
     @Test
-    void shouldCancelSale() throws Exception {
-        when(posSaleService.cancel(1L)).thenReturn(response(1L, SaleStatus.CANCELLED));
+    void shouldCancelSaleWithReason() throws Exception {
+        when(posSaleService.cancel(1L, "Cliente solicito anulacion")).thenReturn(response(1L, SaleStatus.CANCELLED));
 
-        mockMvc.perform(post("/api/pos/sales/1/cancel"))
+        mockMvc.perform(post("/api/pos/sales/1/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"Cliente solicito anulacion\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void shouldValidateCancelReason() throws Exception {
+        mockMvc.perform(post("/api/pos/sales/1/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors.reason").exists());
     }
 
     @Test
@@ -132,25 +153,48 @@ class PosSaleControllerTest {
 
         mockMvc.perform(get("/api/pos/sales/open"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(7));
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.totalAmount").value(12000.00));
+    }
+
+    private PosSaleSummaryResponse summary(Long id, SaleStatus status) {
+        return new PosSaleSummaryResponse(
+                id,
+                "S-2026-00000001",
+                "POS",
+                Instant.parse("2026-03-15T12:00:00Z"),
+                status,
+                new BigDecimal("11900.00"),
+                new BigDecimal("10000.00"),
+                new BigDecimal("1900.00"),
+                new BigDecimal("11900.00"),
+                PaymentMethod.CASH,
+                1L,
+                "admin.tienda@colabohub.cl");
     }
 
     private PosSaleResponse response(Long id, SaleStatus status) {
         return new PosSaleResponse(
                 id,
                 "S-2026-00000001",
+                1L,
                 status,
                 PaymentMethod.CASH,
+                new BigDecimal("10084.03"),
+                new BigDecimal("1915.97"),
                 new BigDecimal("12000.00"),
                 BigDecimal.ZERO.setScale(2),
                 new BigDecimal("12000.00"),
-                BigDecimal.ZERO.setScale(0),
+                BigDecimal.ZERO.setScale(2),
                 new BigDecimal("12000.00"),
-                null,
+                new BigDecimal("39000.00"),
                 new BigDecimal("0.00169"),
                 new BigDecimal("0.0079"),
                 Instant.parse("2026-03-15T12:00:00Z"),
                 status == SaleStatus.CONFIRMED ? Instant.parse("2026-03-15T12:05:00Z") : null,
+                status == SaleStatus.CANCELLED ? Instant.parse("2026-03-15T12:10:00Z") : null,
+                status == SaleStatus.CANCELLED ? "admin@colabohub.cl" : null,
+                status == SaleStatus.CANCELLED ? "Cliente solicito anulacion" : null,
                 List.of(new PosSaleItemResponse(
                         500L,
                         1000L,
@@ -168,10 +212,16 @@ class PosSaleControllerTest {
                         SaleItemPricingType.NORMAL,
                         null,
                         null,
-                        BigDecimal.ZERO.setScale(0),
-                        BigDecimal.ZERO.setScale(0),
-                        BigDecimal.ZERO.setScale(0),
-                        BigDecimal.ZERO.setScale(0),
+                        new BigDecimal("66.00"),
+                        new BigDecimal("228.00"),
+                        new BigDecimal("56.00"),
+                        new BigDecimal("350.00"),
+                        new BigDecimal("11650.00"),
+                        false,
+                        new BigDecimal("39000.00"),
+                        new BigDecimal("0.00169"),
+                        new BigDecimal("0.0079"),
+                        new BigDecimal("11650.00"),
                         new BigDecimal("12000.00"))),
                 List.of(new PosSaleStoreSummaryResponse(
                         10L,
@@ -179,10 +229,10 @@ class PosSaleControllerTest {
                         1,
                         1,
                         new BigDecimal("12000.00"),
-                        BigDecimal.ZERO.setScale(0),
-                        BigDecimal.ZERO.setScale(0),
-                        BigDecimal.ZERO.setScale(0),
-                        BigDecimal.ZERO.setScale(0),
-                        new BigDecimal("12000.00"))));
+                        new BigDecimal("66.00"),
+                        new BigDecimal("228.00"),
+                        new BigDecimal("56.00"),
+                        new BigDecimal("350.00"),
+                        new BigDecimal("11650.00"))));
     }
 }

@@ -98,6 +98,10 @@ public class UserService {
         user.setPhone(trimToNull(request.phone()));
         user.setContactName(trimToNull(request.contactName()));
         user.setDescription(trimToNull(request.description()));
+        user.setMonthlyRent(request.monthlyRent());
+        user.setStartDate(request.startDate());
+        user.setStandNumber(trimToNull(request.standNumber()));
+        user.setFactura(Boolean.TRUE.equals(request.factura()));
         user.setActive(request.active() == null || request.active());
         user.setAuthProvider("GOOGLE");
         user.getRoles().clear();
@@ -153,6 +157,10 @@ public class UserService {
                 user.getPhone(),
                 user.getContactName(),
                 user.getDescription(),
+                user.getMonthlyRent(),
+                user.getStartDate(),
+                user.getStandNumber(),
+                user.isFactura(),
                 roles,
                 marketIds,
                 storeIds,

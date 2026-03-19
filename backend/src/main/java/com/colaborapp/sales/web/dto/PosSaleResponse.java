@@ -10,8 +10,11 @@ import com.colaborapp.sales.domain.SaleStatus;
 public record PosSaleResponse(
         Long id,
         String saleNumber,
+        Long marketId,
         SaleStatus status,
         PaymentMethod paymentMethod,
+        BigDecimal netAmount,
+        BigDecimal ivaAmount,
         BigDecimal subtotalAmount,
         BigDecimal totalDiscountAmount,
         BigDecimal totalAmount,
@@ -22,6 +25,9 @@ public record PosSaleResponse(
         BigDecimal commissionPercentageValue,
         Instant openedAt,
         Instant confirmedAt,
+        Instant cancelledAt,
+        String cancelledBy,
+        String cancellationReason,
         List<PosSaleItemResponse> items,
         List<PosSaleStoreSummaryResponse> storeSummaries) {
 }

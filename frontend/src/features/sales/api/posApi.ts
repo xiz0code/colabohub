@@ -22,6 +22,12 @@ export type PosSaleItem = {
   commissionIvaAmount: number;
   totalCommissionAmount: number;
   netAmount: number;
+  promotionApplied: boolean;
+  ufValue: number | null;
+  commissionUfValue: number | null;
+  commissionPercentageValue: number | null;
+  totalCollaboratorAmount: number;
+  totalClientAmount: number;
 };
 
 export type PosSaleStoreSummary = {
@@ -41,6 +47,7 @@ export type PosProduct = {
   id: number;
   storeId: number;
   storeName: string;
+  collaboratorName: string;
   name: string;
   sku: string;
   barcode: string;
@@ -51,8 +58,11 @@ export type PosProduct = {
 export type PosSale = {
   id: number;
   saleNumber: string;
+  marketId: number | null;
   status: "OPEN" | "CONFIRMED" | "CANCELLED";
   paymentMethod: "CASH" | "CREDIT" | "DEBITO" | "TRANSFER";
+  netAmount: number;
+  ivaAmount: number;
   subtotalAmount: number;
   totalDiscountAmount: number;
   totalAmount: number;
@@ -63,8 +73,26 @@ export type PosSale = {
   commissionPercentageValue: number | null;
   openedAt: string;
   confirmedAt: string | null;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancellationReason: string | null;
   items: PosSaleItem[];
   storeSummaries: PosSaleStoreSummary[];
+};
+
+export type PosSaleSummary = {
+  id: number;
+  saleNumber: string;
+  type: string;
+  dateTime: string;
+  status: "OPEN" | "CONFIRMED" | "CANCELLED";
+  subtotalAmount: number;
+  netAmount: number;
+  ivaAmount: number;
+  totalAmount: number;
+  paymentMethod: PosSale["paymentMethod"] | null;
+  marketId: number | null;
+  sellerName: string | null;
 };
 
 export function createPosSale(paymentMethod?: PosSale["paymentMethod"]) {
@@ -76,8 +104,12 @@ export function createPosSale(paymentMethod?: PosSale["paymentMethod"]) {
   });
 }
 
+export function listPosSales() {
+  return apiFetch<PosSaleSummary[]>("/api/pos/sales");
+}
+
 export function getOpenPosSale() {
-  return apiFetch<PosSale | null>("/api/pos/sales/open");
+  return apiFetch<PosSale>("/api/pos/sales/open");
 }
 
 export function getPosSale(saleId: number) {
@@ -138,8 +170,9 @@ export function confirmPosSale(saleId: number) {
   });
 }
 
-export function cancelPosSale(saleId: number) {
+export function cancelPosSale(saleId: number, reason: string) {
   return apiFetch<PosSale>(`/api/pos/sales/${saleId}/cancel`, {
     method: "POST",
+    body: JSON.stringify({ reason }),
   });
 }

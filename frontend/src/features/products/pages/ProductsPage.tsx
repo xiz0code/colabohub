@@ -5,10 +5,12 @@ import { useSession } from "@/features/auth/session/SessionProvider";
 import {
   createProduct,
   getProductAudit,
+  importProductsCsv,
   listProducts,
   printBarcodeLabels,
   type Product,
   type ProductAuditLog,
+  type ProductImportResult,
   type ProductPromotion,
   type ProductPromotionInput,
   updateProduct,
@@ -36,6 +38,11 @@ type BarcodeModalState = {
   items: Array<{ productId: number; productName: string; quantity: string }>;
 };
 
+type ImportModalState = {
+  file: File | null;
+  result: ProductImportResult | null;
+};
+
 const EMPTY_FORM: ProductFormState = {
   name: "",
   ownerUserId: "",
@@ -51,8 +58,8 @@ const EMPTY_FORM: ProductFormState = {
 export function ProductsPage() {
   const queryClient = useQueryClient();
   const { user } = useSession();
-  const activeMarketName = user?.activeMarketName ?? "tu Tienda";
-  const activeMarketId = user?.marketIds?.[0] ?? null;
+  const activeMarketName = user?.activeMarketName ?? "tu Espacio";
+  const activeMarketId = user?.activeMarketId ?? null;
   const [search, setSearch] = useState("");
   const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -61,6 +68,7 @@ export function ProductsPage() {
   const [editForm, setEditForm] = useState<ProductFormState>(EMPTY_FORM);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
   const [barcodeModal, setBarcodeModal] = useState<BarcodeModalState | null>(null);
+  const [importModal, setImportModal] = useState<ImportModalState | null>(null);
 
   const productsQuery = useQuery({
     queryKey: ["products", "catalog", search],
@@ -171,6 +179,23 @@ export function ProductsPage() {
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos generar el PDF.") }),
   });
 
+  const importMutation = useMutation({
+    mutationFn: (file: File) => importProductsCsv(file),
+    onSuccess: async (result) => {
+      setImportModal((current) => (current ? { ...current, result } : { file: null, result }));
+      setFeedback({
+        kind: result.errorCount > 0 ? "info" : "success",
+        message:
+          result.errorCount > 0
+            ? `La carga masiva termino con ${result.successCount} productos creados y ${result.errorCount} filas con observaciones.`
+            : `Se importaron ${result.successCount} productos correctamente.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+    onError: (error) =>
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos procesar el archivo CSV.") }),
+  });
+
   const allVisibleSelected =
     (productsQuery.data?.content.length ?? 0) > 0 &&
     (productsQuery.data?.content.every((product) => selectedProductIds.includes(product.id)) ?? false);
@@ -179,7 +204,7 @@ export function ProductsPage() {
     <section className="space-y-6">
       <PageHeader
         title="Stock"
-        description="Gestiona productos, promociones y codigos de barra con una vista amplia y comoda para operar tu Tienda."
+        description="Gestiona productos, promociones y codigos de barra con una vista amplia y comoda para operar tu Espacio."
         eyebrow="Catalogo principal"
       />
 
@@ -190,7 +215,7 @@ export function ProductsPage() {
           <div>
             <h2 className="text-xl font-semibold tracking-tight">Catalogo de {activeMarketName}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Cada producto se vincula a un Colaborador y puede tener una sola promocion activa.
+              Cada producto se vincula a una Tienda y puede tener una sola promocion activa.
             </p>
           </div>
 
@@ -201,6 +226,13 @@ export function ProductsPage() {
               placeholder="Buscar por nombre o SKU"
               className="min-w-[240px] rounded-full border border-white/85 bg-white/80 px-4 py-3 text-sm shadow-sm outline-none transition focus:border-violet-200 focus:bg-white"
             />
+            <button
+              type="button"
+              onClick={() => setImportModal({ file: null, result: null })}
+              className="rounded-full border border-white/90 bg-white/85 px-5 py-3 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5"
+            >
+              Carga masiva
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -217,7 +249,7 @@ export function ProductsPage() {
 
         {collaborators.length === 0 ? (
           <div className="mt-5">
-            <FeedbackMessage kind="info" message="Crea al menos un Colaborador para poder asignar productos." />
+            <FeedbackMessage kind="info" message="Crea al menos una Tienda para poder asignar productos." />
           </div>
         ) : null}
 
@@ -254,7 +286,7 @@ export function ProductsPage() {
         {productsQuery.data?.empty ? (
           <div className="mt-6">
             <EmptyState
-              title="Todavia no hay productos en tu Tienda"
+              title="Todavia no hay productos en tu Espacio"
               description="Crea tu primer producto para empezar a vender, imprimir codigos y organizar el stock."
             />
           </div>
@@ -277,7 +309,7 @@ export function ProductsPage() {
                       <span>Producto</span>
                     </label>
                   </th>
-                  <th>Colaborador</th>
+                  <th>Tienda</th>
                   <th>Precio</th>
                   <th>Stock</th>
                   <th>Descripcion corta</th>
@@ -345,10 +377,113 @@ export function ProductsPage() {
       </div>
 
       <Modal
+        open={importModal !== null}
+        onClose={() => {
+          if (!importMutation.isPending) {
+            setImportModal(null);
+          }
+        }}
+        title="Carga masiva de productos"
+        description="Importa productos con una plantilla CSV. Procesaremos fila por fila para mostrarte exactamente cuales se cargaron y cuales debes corregir."
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              onClick={downloadTemplate}
+              className="rounded-full border border-white/90 bg-white/80 px-4 py-2.5 text-sm font-semibold text-foreground"
+            >
+              Descargar plantilla
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportModal(null)}
+              className="rounded-full border border-white/90 bg-white/80 px-4 py-2.5 text-sm font-semibold text-muted-foreground"
+            >
+              Cerrar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (importModal?.file) {
+                  setFeedback(null);
+                  importMutation.mutate(importModal.file);
+                }
+              }}
+              disabled={importMutation.isPending || !importModal?.file}
+              className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {importMutation.isPending ? "Importando..." : "Procesar archivo"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="soft-subtle-surface p-4">
+            <p className="text-sm font-semibold">Plantilla esperada</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor
+            </p>
+          </div>
+
+          <label className="grid gap-2 text-sm">
+            <span>Archivo CSV</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) =>
+                setImportModal((current) =>
+                  current
+                    ? {
+                        ...current,
+                        file: event.target.files?.[0] ?? null,
+                        result: null,
+                      }
+                    : current,
+                )
+              }
+              className="rounded-2xl border border-input bg-background px-3 py-3"
+            />
+          </label>
+
+          {importModal?.file ? (
+            <div className="soft-chip w-fit">
+              Archivo seleccionado: {importModal.file.name}
+            </div>
+          ) : null}
+
+          {importModal?.result ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <InfoCard label="Productos creados" value={String(importModal.result.successCount)} />
+                <InfoCard label="Filas con observaciones" value={String(importModal.result.errorCount)} />
+              </div>
+
+              {importModal.result.errors.length > 0 ? (
+                <div className="space-y-3">
+                  {importModal.result.errors.map((error) => (
+                    <div key={`${error.rowNumber}-${error.rowData}`} className="rounded-[22px] border border-rose-100 bg-rose-50/80 px-4 py-4">
+                      <p className="text-sm font-semibold text-rose-700">Fila {error.rowNumber}</p>
+                      <p className="mt-1 text-sm text-rose-700">{error.message}</p>
+                      <p className="mt-2 text-xs text-rose-600">{error.rowData}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Carga completada sin observaciones"
+                  description="Todos los productos del archivo fueron creados correctamente."
+                />
+              )}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Crear producto"
-        description="La Tienda se resuelve automaticamente desde tu sesion. Solo define el producto y su Colaborador responsable."
+        description="El Espacio se resuelve automaticamente desde tu sesion. Solo define el producto y su Tienda responsable."
         footer={
           <FooterActions
             submitLabel={createMutation.isPending ? "Creando..." : "Guardar producto"}
@@ -524,9 +659,9 @@ function ProductForm({
           <input required value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} className="rounded-2xl border border-input bg-background px-3 py-2.5" />
         </label>
         <label className="grid gap-2 text-sm">
-          <span>Colaborador responsable</span>
+          <span>Tienda responsable</span>
           <select required value={form.ownerUserId} onChange={(event) => onChange({ ...form, ownerUserId: event.target.value })} className="rounded-2xl border border-input bg-background px-3 py-2.5">
-            <option value="">Selecciona un Colaborador</option>
+            <option value="">Selecciona una Tienda</option>
             {collaborators.map((collaborator) => (
               <option key={collaborator.id} value={collaborator.id}>
                 {collaborator.fullName}
@@ -691,6 +826,22 @@ function buildSku(name: string) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
   return base || `PRODUCTO-${Date.now()}`;
+}
+
+function downloadTemplate() {
+  const content = [
+    "nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor",
+    "Sticker BTS,2000,10,Pack brillante,camila@example.com,,",
+    "Llavero TXT,3500,5,Version glitter,lucia@example.com,QUANTITY_BLOCK,3x9000",
+  ].join("\n");
+
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "plantilla-productos-colabohub.csv";
+  anchor.click();
+  window.URL.revokeObjectURL(url);
 }
 
 function toggleSelection(productId: number, setSelected: Dispatch<SetStateAction<number[]>>) {

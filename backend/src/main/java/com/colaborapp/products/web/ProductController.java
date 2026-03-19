@@ -16,16 +16,20 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.colaborapp.common.web.dto.PageResponse;
 import com.colaborapp.inventory.service.InventoryService;
 import com.colaborapp.inventory.web.dto.StockMovementResponse;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.service.BarcodeLabelPdfService;
+import com.colaborapp.products.service.ProductImportService;
 import com.colaborapp.products.service.ProductService;
 import com.colaborapp.products.web.dto.BarcodeLabelRequest;
 import com.colaborapp.products.web.dto.ProductAuditLogResponse;
 import com.colaborapp.products.web.dto.ProductCreateRequest;
+import com.colaborapp.products.web.dto.ProductImportResponse;
 import com.colaborapp.products.web.dto.ProductListQuery;
 import com.colaborapp.products.web.dto.ProductResponse;
 import com.colaborapp.products.web.dto.ProductStatusUpdateRequest;
@@ -45,6 +49,7 @@ public class ProductController {
     private final ProductService productService;
     private final InventoryService inventoryService;
     private final BarcodeLabelPdfService barcodeLabelPdfService;
+    private final ProductImportService productImportService;
 
     @GetMapping
     @PreAuthorize("@accessControl.canReadInventory()")
@@ -62,6 +67,12 @@ public class ProductController {
     @PreAuthorize("@accessControl.canManageCatalog()")
     public ProductResponse createProduct(@Valid @RequestBody ProductCreateRequest request) {
         return productService.createProduct(request);
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("@accessControl.canManageCatalog()")
+    public ProductImportResponse importProducts(@RequestPart("file") MultipartFile file) {
+        return productImportService.importCsv(file);
     }
 
     @PutMapping("/{productId}")

@@ -19,6 +19,8 @@ import com.colaborapp.config.bootstrap.CurrentTenantProvider;
 import com.colaborapp.markets.repository.MarketRepository;
 import com.colaborapp.reports.web.dto.SaleDetailStoreSummaryResponse;
 import com.colaborapp.reports.web.dto.SaleTodayDetailResponse;
+import com.colaborapp.reports.web.dto.CollaboratorSaleEntryResponse;
+import com.colaborapp.reports.web.dto.CollaboratorSalesReportResponse;
 import com.colaborapp.reports.web.dto.DashboardSummaryResponse;
 import com.colaborapp.reports.web.dto.MarketPayoutsTodayResponse;
 import com.colaborapp.reports.web.dto.MarketSalesTodayReportResponse;
@@ -40,6 +42,7 @@ import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.sales.domain.SaleStoreSummary;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.users.domain.RoleCode;
+import com.colaborapp.users.repository.UserRepository;
 import com.colaborapp.stores.repository.StoreRepository;
 
 @Service
@@ -53,6 +56,7 @@ public class SalesReportService {
     private final StoreRepository storeRepository;
     private final MarketRepository marketRepository;
     private final ProductRepository productRepository;
+    private final UserRepository userRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final AccessControlService accessControlService;
     private final ZoneId businessZone;
@@ -64,6 +68,7 @@ public class SalesReportService {
             StoreRepository storeRepository,
             MarketRepository marketRepository,
             ProductRepository productRepository,
+            UserRepository userRepository,
             CurrentTenantProvider currentTenantProvider,
             AccessControlService accessControlService,
             @Value("${app.business-zone:America/Santiago}") String businessZone) {
@@ -73,6 +78,7 @@ public class SalesReportService {
         this.storeRepository = storeRepository;
         this.marketRepository = marketRepository;
         this.productRepository = productRepository;
+        this.userRepository = userRepository;
         this.currentTenantProvider = currentTenantProvider;
         this.accessControlService = accessControlService;
         this.businessZone = ZoneId.of(businessZone);
@@ -192,6 +198,60 @@ public class SalesReportService {
                 market.getName(),
                 businessDate,
                 stores);
+    }
+
+    @Transactional(readOnly = true)
+    public CollaboratorSalesReportResponse getCollaboratorSalesReport(Long collaboratorUserId, LocalDate dateFrom, LocalDate dateTo) {
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        var collaborator = userRepository.findWithAccessById(collaboratorUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("No encontramos al colaborador solicitado."));
+
+        validateCollaboratorAccess(collaboratorUserId, collaborator.getMarkets().stream().map(m -> m.getId()).toList());
+
+        LocalDate effectiveFrom = dateFrom == null ? LocalDate.now(businessZone) : dateFrom;
+        LocalDate effectiveTo = dateTo == null ? effectiveFrom : dateTo;
+        Instant startAt = effectiveFrom.atStartOfDay(businessZone).toInstant();
+        Instant endAt = effectiveTo.plusDays(1).atStartOfDay(businessZone).toInstant();
+
+        List<SaleItem> items = saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                tenantId,
+                collaboratorUserId,
+                SaleStatus.CONFIRMED,
+                startAt,
+                endAt);
+
+        BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
+        BigDecimal totalCommission = BigDecimal.ZERO.setScale(4);
+        BigDecimal totalNet = BigDecimal.ZERO.setScale(4);
+        BigDecimal totalIva = BigDecimal.ZERO.setScale(4);
+
+        List<CollaboratorSaleEntryResponse> entries = new java.util.ArrayList<>();
+        for (SaleItem item : items) {
+            totalAmount = totalAmount.add(item.getSubtotal());
+            totalCommission = totalCommission.add(item.getTotalCommissionAmount());
+            totalNet = totalNet.add(item.getNetAmount());
+            totalIva = totalIva.add(item.getSubtotal().subtract(item.getSubtotal().divide(new BigDecimal("1.19"), 4, java.math.RoundingMode.HALF_UP)));
+            entries.add(new CollaboratorSaleEntryResponse(
+                    item.getSale().getId(),
+                    item.getSale().getSaleNumber(),
+                    item.getSale().getConfirmedAt(),
+                    item.getProductNameSnapshot(),
+                    item.getQuantity(),
+                    item.getSubtotal(),
+                    item.getTotalCommissionAmount(),
+                    item.getNetAmount()));
+        }
+
+        return new CollaboratorSalesReportResponse(
+                collaboratorUserId,
+                collaborator.getFullName(),
+                effectiveFrom,
+                effectiveTo,
+                totalAmount,
+                totalCommission,
+                totalNet,
+                totalIva,
+                entries);
     }
 
     private StoreSalesSummaryResponse toStoreSummary(Object[] row) {
@@ -344,6 +404,25 @@ public class SalesReportService {
             return 0L;
         }
         return productRepository.countByTenantIdAndStore_Market_IdInAndStatus(tenantId, marketIds, ProductStatus.ACTIVE);
+    }
+
+    private void validateCollaboratorAccess(Long collaboratorUserId, List<Long> collaboratorMarketIds) {
+        if (accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)) {
+            return;
+        }
+        if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+            Long currentUserId = accessControlService.getCurrentUser().user().getId();
+            if (!currentUserId.equals(collaboratorUserId)) {
+                throw new org.springframework.security.access.AccessDeniedException("You do not have permission to perform this action.");
+            }
+            return;
+        }
+
+        Set<Long> allowedMarketIds = Set.copyOf(accessControlService.currentMarketIds());
+        boolean allowed = collaboratorMarketIds.stream().anyMatch(allowedMarketIds::contains);
+        if (!allowed) {
+            throw new org.springframework.security.access.AccessDeniedException("You do not have permission to perform this action.");
+        }
     }
 
     private long countLowStockProducts(Long tenantId) {

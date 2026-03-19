@@ -34,6 +34,7 @@ import com.colaborapp.sales.repository.SaleItemRepository;
 import com.colaborapp.sales.repository.SaleRepository;
 import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
+import com.colaborapp.sales.web.dto.PosSaleSummaryResponse;
 import com.colaborapp.sales.web.dto.PosPaymentMethodUpdateRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemResponse;
@@ -102,23 +103,26 @@ public class PosSaleService {
         sale.setCommissionPercentageValue(null);
         sale.setOpenedAt(Instant.now());
         sale.setConfirmedAt(null);
+        sale.setCancelledAt(null);
+        sale.setCancelledBy(null);
+        sale.setCancellationReason(null);
         saleRepository.save(sale);
         return buildResponse(sale, List.of(), List.of());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public PosSaleResponse getOpenSaleOrNull(Long marketId) {
+        return createSale(new CreatePosSaleRequest(PaymentMethod.CASH, marketId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PosSaleSummaryResponse> listSales() {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
-        Long effectiveMarketId = resolveAuthenticatedPosMarketId();
-        return resolveExistingOpenSale(tenantId, effectiveMarketId)
-                .map(sale -> {
-                    requireSaleAccess(sale);
-                    return buildResponse(
-                            sale,
-                            saleItemRepository.findAllBySaleIdWithDetails(sale.getId()),
-                            saleStoreSummaryRepository.findAllBySaleIdWithStore(sale.getId()));
-                })
-                .orElse(null);
+        Long marketId = resolveAuthenticatedPosMarketId();
+
+        return saleRepository.findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(tenantId, marketId).stream()
+                .map(this::buildSummaryResponse)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -194,25 +198,30 @@ public class PosSaleService {
     }
 
     @Transactional
-    public PosSaleResponse cancel(Long saleId) {
+    public PosSaleResponse cancel(Long saleId, String reason) {
         requirePosWriteAccess();
         Sale sale = getSaleEntity(saleId);
         if (sale.getStatus() == SaleStatus.CANCELLED) {
             throw new BusinessException("Sale is already cancelled.");
         }
-        if (sale.getStatus() == SaleStatus.OPEN && sale.getConfirmedAt() != null) {
-            sale.setConfirmedAt(null);
+        if (sale.getStatus() != SaleStatus.CONFIRMED && sale.getStatus() != SaleStatus.OPEN) {
+            throw new BusinessException("Only open or confirmed sales can be cancelled.");
+        }
+
+        String normalizedReason = reason == null ? "" : reason.trim();
+        if (normalizedReason.isBlank()) {
+            throw new BusinessException("Ingresa un motivo para anular la venta.");
+        }
+
+        List<SaleItem> items = saleItemRepository.findAllBySaleIdWithDetails(saleId);
+        Map<Long, Product> lockedProducts = new HashMap<>();
+        for (Product product : productRepository.findAllByTenantIdAndIdInForUpdate(
+                sale.getTenant().getId(),
+                items.stream().map(item -> item.getProduct().getId()).distinct().toList())) {
+            lockedProducts.put(product.getId(), product);
         }
 
         if (sale.getStatus() == SaleStatus.CONFIRMED) {
-            List<SaleItem> items = saleItemRepository.findAllBySaleIdWithDetails(saleId);
-            Map<Long, Product> lockedProducts = new HashMap<>();
-            for (Product product : productRepository.findAllByTenantIdAndIdInForUpdate(
-                    sale.getTenant().getId(),
-                    items.stream().map(item -> item.getProduct().getId()).distinct().toList())) {
-                lockedProducts.put(product.getId(), product);
-            }
-
             for (SaleItem item : items) {
                 Product product = lockedProducts.get(item.getProduct().getId());
                 if (product == null) {
@@ -235,11 +244,12 @@ public class PosSaleService {
                 movement.setReferenceId(sale.getId());
                 stockMovementRepository.save(movement);
             }
-        } else if (sale.getStatus() != SaleStatus.OPEN) {
-            throw new BusinessException("Only open or confirmed sales can be cancelled.");
         }
 
         sale.setStatus(SaleStatus.CANCELLED);
+        sale.setCancelledAt(Instant.now());
+        sale.setCancelledBy(authenticatedUserService.getCurrentUserSnapshot().user().getEmail());
+        sale.setCancellationReason(normalizedReason);
         return buildResponse(
                 sale,
                 saleItemRepository.findAllBySaleIdWithDetails(saleId),
@@ -455,10 +465,8 @@ public class PosSaleService {
 
         BigDecimal ufValue = null;
         if (sale.getPaymentMethod() == PaymentMethod.DEBITO) {
-            ufValue = sale.getUfValue();
-            if (ufValue == null) {
-                throw new BusinessException("Configura el valor UF de la Tienda antes de cobrar ventas con debito.");
-            }
+            ufValue = commissionSettingsService.ensureOperationalUfValue(sale.getMarket());
+            sale.setUfValue(ufValue);
         }
 
         PosPricingService.RecalculationResult pricing = posPricingService.calculateSalePricing(items, sale.getPaymentMethod(), ufValue);
@@ -545,29 +553,39 @@ public class PosSaleService {
     }
 
     private PosSaleResponse buildResponse(Sale sale, List<SaleItem> items, List<SaleStoreSummary> summaries) {
+        TaxBreakdown saleTaxBreakdown = calculateTaxBreakdown(sale.getTotalAmount());
         List<PosSaleItemResponse> itemResponses = items.stream()
-                .map(item -> new PosSaleItemResponse(
-                        item.getId(),
-                        item.getProduct().getId(),
-                        item.getStore().getId(),
-                        item.getStore().getName(),
-                        item.getProductNameSnapshot(),
-                        item.getCollaboratorNameSnapshot(),
-                        item.getProductSkuSnapshot(),
-                        item.getProductBarcodeSnapshot(),
-                        item.getQuantity(),
-                        item.getBaseUnitPrice(),
-                        item.getLineBaseSubtotal(),
-                        item.getPromotionDiscountAmount(),
-                        item.getSubtotal(),
-                        item.getPricingType(),
-                        item.getAppliedPromotionId(),
-                        item.getAppliedPromotionName(),
-                        item.getCommission1Amount(),
-                        item.getCommission2Amount(),
-                        item.getCommissionIvaAmount(),
-                        item.getTotalCommissionAmount(),
-                        item.getNetAmount()))
+                .map(item -> {
+                    Long productId = item.getProduct() != null ? item.getProduct().getId() : null;
+                    return new PosSaleItemResponse(
+                            item.getId(),
+                            productId,
+                            item.getStore().getId(),
+                            item.getStore().getName(),
+                            item.getProductNameSnapshot(),
+                            item.getCollaboratorNameSnapshot(),
+                            item.getProductSkuSnapshot(),
+                            item.getProductBarcodeSnapshot(),
+                            item.getQuantity(),
+                            item.getBaseUnitPrice(),
+                            item.getLineBaseSubtotal(),
+                            item.getPromotionDiscountAmount(),
+                            item.getSubtotal(),
+                            item.getPricingType(),
+                            item.getAppliedPromotionId(),
+                            item.getAppliedPromotionName(),
+                            item.getCommission1Amount(),
+                            item.getCommission2Amount(),
+                            item.getCommissionIvaAmount(),
+                            item.getTotalCommissionAmount(),
+                            item.getNetAmount(),
+                            item.getPricingType() != null && item.getPricingType() != com.colaborapp.sales.domain.SaleItemPricingType.NORMAL,
+                            sale.getUfValue(),
+                            sale.getCommissionUfValue(),
+                            sale.getCommissionPercentageValue(),
+                            item.getNetAmount(),
+                            item.getSubtotal());
+                })
                 .toList();
 
         List<PosSaleStoreSummaryResponse> summaryResponses = summaries.stream()
@@ -587,8 +605,11 @@ public class PosSaleService {
         return new PosSaleResponse(
                 sale.getId(),
                 sale.getSaleNumber(),
+                sale.getMarket() != null ? sale.getMarket().getId() : null,
                 sale.getStatus(),
                 sale.getPaymentMethod(),
+                saleTaxBreakdown.netAmount(),
+                saleTaxBreakdown.ivaAmount(),
                 sale.getSubtotalAmount(),
                 sale.getTotalDiscountAmount(),
                 sale.getTotalAmount(),
@@ -599,12 +620,46 @@ public class PosSaleService {
                 sale.getCommissionPercentageValue(),
                 sale.getOpenedAt(),
                 sale.getConfirmedAt(),
+                sale.getCancelledAt(),
+                sale.getCancelledBy(),
+                sale.getCancellationReason(),
                 itemResponses,
                 summaryResponses);
+    }
+
+    private PosSaleSummaryResponse buildSummaryResponse(Sale sale) {
+        Instant dateTime = sale.getConfirmedAt() != null ? sale.getConfirmedAt() : sale.getOpenedAt();
+        TaxBreakdown breakdown = calculateTaxBreakdown(sale.getTotalAmount());
+        return new PosSaleSummaryResponse(
+                sale.getId(),
+                sale.getSaleNumber(),
+                "POS",
+                dateTime,
+                sale.getStatus(),
+                sale.getSubtotalAmount(),
+                breakdown.netAmount(),
+                breakdown.ivaAmount(),
+                sale.getTotalAmount(),
+                sale.getPaymentMethod(),
+                sale.getMarket() != null ? sale.getMarket().getId() : null,
+                sale.getCreatedBy());
+    }
+
+    private TaxBreakdown calculateTaxBreakdown(BigDecimal totalAmount) {
+        BigDecimal total = totalAmount == null ? ZERO : totalAmount;
+        BigDecimal divisor = new BigDecimal("1.19");
+        BigDecimal net = total.divide(divisor, 4, HALF_UP);
+        BigDecimal iva = total.subtract(net).setScale(4, HALF_UP);
+        return new TaxBreakdown(net, iva);
     }
 
     private record RecalculationSnapshot(
             List<SaleItem> items,
             List<SaleStoreSummary> summaries) {
+    }
+
+    private record TaxBreakdown(
+            BigDecimal netAmount,
+            BigDecimal ivaAmount) {
     }
 }

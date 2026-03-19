@@ -5,6 +5,7 @@ import { useSession } from "@/features/auth/session/SessionProvider";
 import {
   getGlobalFinancialSettings,
   getMarketFinancialSettings,
+  resetMarketUfValueToAutomatic,
   updateGlobalCommissionSettings,
   updateGlobalUfValue,
   updateMarketCommissionSettings,
@@ -21,12 +22,13 @@ export function CommissionsPage() {
   const { primaryRole, user } = useSession();
   const isSystemAdmin = primaryRole === "ADMIN_SYSTEM";
   const isMarketAdmin = primaryRole === "ADMIN_MARKET";
-  const activeMarketId = isMarketAdmin ? (user?.marketIds[0] ?? null) : null;
+  const activeMarketId = isMarketAdmin ? (user?.activeMarketId ?? null) : null;
   const [selectedMarketId, setSelectedMarketId] = useState<string>("");
   const [globalForm, setGlobalForm] = useState({
     ufValue: "",
     commissionUfValue: "",
     commissionPercentageValue: "",
+    useDynamicFixedCommission: true,
   });
   const [marketForm, setMarketForm] = useState({
     overrideEnabled: false,
@@ -37,6 +39,7 @@ export function CommissionsPage() {
     ufValue: "",
   });
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [isEditingMarketUf, setIsEditingMarketUf] = useState(false);
 
   const marketsQuery = useQuery({
     queryKey: ["markets", "settings"],
@@ -76,6 +79,7 @@ export function CommissionsPage() {
       ufValue: String(globalSettingsQuery.data.currentUfValue),
       commissionUfValue: String(globalSettingsQuery.data.commissionUfValue),
       commissionPercentageValue: String(globalSettingsQuery.data.commissionPercentageValue),
+      useDynamicFixedCommission: globalSettingsQuery.data.useDynamicFixedCommission,
     });
   }, [globalSettingsQuery.data]);
 
@@ -92,6 +96,7 @@ export function CommissionsPage() {
       globalPromotionPercentage: String(marketSettingsQuery.data.globalPromotionPercentage ?? ""),
       ufValue: String(marketSettingsQuery.data.ufValue ?? ""),
     });
+    setIsEditingMarketUf(false);
   }, [marketSettingsQuery.data]);
 
   const updateUfMutation = useMutation({
@@ -105,7 +110,11 @@ export function CommissionsPage() {
 
   const updateGlobalCommissionsMutation = useMutation({
     mutationFn: ({ commissionUfValue, commissionPercentageValue }: { commissionUfValue: number; commissionPercentageValue: number }) =>
-      updateGlobalCommissionSettings(commissionUfValue, commissionPercentageValue),
+      updateGlobalCommissionSettings(
+        commissionUfValue,
+        commissionPercentageValue,
+        globalForm.useDynamicFixedCommission,
+      ),
     onSuccess: async () => {
       setFeedback({ kind: "success", message: "Comisiones globales actualizadas correctamente." });
       await Promise.all([
@@ -153,10 +162,22 @@ export function CommissionsPage() {
     mutationFn: (ufValue: number) => updateMarketUfValue(ufValue),
     onSuccess: async () => {
       setFeedback({ kind: "success", message: "Valor UF de la Tienda actualizado correctamente." });
+      setIsEditingMarketUf(false);
       await queryClient.invalidateQueries({ queryKey: ["settings", "market"] });
     },
     onError: (error) =>
       setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible actualizar el valor UF de la Tienda.") }),
+  });
+
+  const resetMarketUfMutation = useMutation({
+    mutationFn: resetMarketUfValueToAutomatic,
+    onSuccess: async () => {
+      setFeedback({ kind: "success", message: "La UF de la Tienda volvió a sincronizarse automáticamente." });
+      setIsEditingMarketUf(false);
+      await queryClient.invalidateQueries({ queryKey: ["settings", "market"] });
+    },
+    onError: (error) =>
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible volver a la UF automatica.") }),
   });
 
   const selectedMarketName = useMemo(() => {
@@ -166,7 +187,7 @@ export function CommissionsPage() {
     if (user?.activeMarketName) {
       return user.activeMarketName;
     }
-    return "tu Tienda";
+    return "tu Espacio";
   }, [marketSettingsQuery.data, user?.activeMarketName]);
 
   const handleGlobalUfSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -210,7 +231,7 @@ export function CommissionsPage() {
     <section className="space-y-6">
       <PageHeader
         title="Configuracion"
-        description="Ajusta comisiones, promociones y el valor UF de tu Tienda desde un espacio amplio y ordenado."
+        description="Ajusta comisiones, promociones y el valor UF de tu Espacio desde un espacio amplio y ordenado."
         eyebrow="Parametros financieros"
       />
 
@@ -220,7 +241,7 @@ export function CommissionsPage() {
         {isSystemAdmin ? (
           <Card
             title="Configuracion general"
-            description="Estos valores funcionan como base del sistema y se aplican cuando una Tienda no tiene un override propio."
+            description="Estos valores funcionan como base del sistema y se aplican cuando un Espacio no tiene un override propio."
             headerAction={
               globalSettingsQuery.data ? <span className="soft-chip">UF global: {formatMoney(globalSettingsQuery.data.currentUfValue)}</span> : null
             }
@@ -236,7 +257,7 @@ export function CommissionsPage() {
             <form onSubmit={handleGlobalCommissionsSubmit} className="grid gap-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="grid gap-2 text-sm">
-                  <span>Comision UF global</span>
+                  <span>Comision fija global</span>
                   <input
                     required
                     min="0"
@@ -249,7 +270,7 @@ export function CommissionsPage() {
                 </label>
 
                 <label className="grid gap-2 text-sm">
-                  <span>Comision % global</span>
+                  <span>Comision variable global</span>
                   <input
                     required
                     min="0"
@@ -261,6 +282,17 @@ export function CommissionsPage() {
                   />
                 </label>
               </div>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={globalForm.useDynamicFixedCommission}
+                  onChange={(event) =>
+                    setGlobalForm((current) => ({ ...current, useDynamicFixedCommission: event.target.checked }))
+                  }
+                />
+                <span>Usar comision fija dinamica por Tienda</span>
+              </label>
 
               <div className="flex flex-wrap gap-3">
                 <button
@@ -308,7 +340,7 @@ export function CommissionsPage() {
         ) : null}
 
         <Card
-          title="Configuracion de la Tienda"
+          title="Configuracion del Espacio"
           description="Revisa rapidamente el contexto activo antes de ajustar comisiones, promociones o UF."
           headerAction={
             isSystemAdmin ? (
@@ -326,32 +358,40 @@ export function CommissionsPage() {
             ) : null
           }
         >
-          {marketSettingsQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando configuracion de la Tienda..." /> : null}
+          {marketSettingsQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando configuracion del Espacio..." /> : null}
           {marketSettingsQuery.isError ? (
             <FeedbackMessage
               kind="error"
-              message={getErrorMessage(marketSettingsQuery.error, "No fue posible cargar la configuracion de la Tienda.")}
+              message={getErrorMessage(marketSettingsQuery.error, "No fue posible cargar la configuracion del Espacio.")}
             />
           ) : null}
 
           {!selectedMarketId && !marketSettingsQuery.isLoading ? (
-            <EmptyState title="Selecciona una Tienda" description="Elige una Tienda para revisar su configuracion financiera." />
+            <EmptyState title="Selecciona un Espacio" description="Elige un Espacio para revisar su configuracion financiera." />
           ) : null}
 
           {marketSettingsQuery.data ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <SummaryPill label="Tienda" value={marketSettingsQuery.data.marketName} />
+              <SummaryPill label="Espacio" value={marketSettingsQuery.data.marketName} />
               <SummaryPill
                 label="UF vigente"
                 value={marketSettingsQuery.data.ufValue != null ? formatMoney(marketSettingsQuery.data.ufValue) : "Pendiente"}
               />
               <SummaryPill
-                label="Comision UF efectiva"
+                label="Modo UF"
+                value={marketSettingsQuery.data.ufManualOverride ? "Manual" : "Automatico"}
+              />
+              <SummaryPill
+                label="Comision fija efectiva"
                 value={String(marketSettingsQuery.data.effectiveCommissionUfValue)}
               />
               <SummaryPill
-                label="Comision % efectiva"
+                label="Comision variable efectiva"
                 value={String(marketSettingsQuery.data.effectiveCommissionPercentageValue)}
+              />
+              <SummaryPill
+                label="Modo comision fija"
+                value={marketSettingsQuery.data.useDynamicFixedCommission ? "Dinamica por Tienda" : "Distribucion general"}
               />
             </div>
           ) : null}
@@ -370,12 +410,12 @@ export function CommissionsPage() {
                     checked={marketForm.overrideEnabled}
                     onChange={(event) => setMarketForm((current) => ({ ...current, overrideEnabled: event.target.checked }))}
                   />
-                  <span>Activar override para esta Tienda</span>
+                  <span>Activar override para este Espacio</span>
                 </label>
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="grid gap-2 text-sm">
-                    <span>Comision UF</span>
+                    <span>Comision fija</span>
                     <input
                       required
                       min="0"
@@ -389,7 +429,7 @@ export function CommissionsPage() {
                   </label>
 
                   <label className="grid gap-2 text-sm">
-                    <span>Comision %</span>
+                    <span>Comision variable</span>
                     <input
                       required
                       min="0"
@@ -417,7 +457,7 @@ export function CommissionsPage() {
 
             <Card
               title="Promocion global"
-              description="Cuando esta activa, reemplaza temporalmente las promociones individuales de los productos de la Tienda."
+              description="Cuando esta activa, reemplaza temporalmente las promociones individuales de los productos del Espacio."
             >
               <form onSubmit={handleMarketCommissionsSubmit} className="grid gap-4">
                 <label className="flex items-center gap-3 rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm">
@@ -462,10 +502,21 @@ export function CommissionsPage() {
             </Card>
 
             <Card
-              title="Valor UF de la Tienda"
-              description="Este valor se guarda como snapshot en cada venta nueva, para que el historico no cambie despues."
+              title="Valor UF del Espacio"
+              description="Cada venta nueva guarda este valor como snapshot. Puedes dejarlo automatico desde mindicador.cl o usar un override manual."
             >
               <form onSubmit={handleMarketUfSubmit} className="grid gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="soft-chip">
+                    Estado: {marketSettingsQuery.data.ufManualOverride ? "Manual" : "Automatico"}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    {marketSettingsQuery.data.ufUpdatedAt
+                      ? `Ultima actualizacion: ${formatDateTime(marketSettingsQuery.data.ufUpdatedAt)}`
+                      : "Aun no se ha definido una UF para este Espacio."}
+                  </span>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
                   <label className="grid gap-2 text-sm">
                     <span>Valor UF</span>
@@ -475,26 +526,49 @@ export function CommissionsPage() {
                       step="0.01"
                       type="number"
                       value={marketForm.ufValue}
-                      disabled={!isMarketAdmin}
+                      disabled={!isMarketAdmin || !isEditingMarketUf}
                       onChange={(event) => setMarketForm((current) => ({ ...current, ufValue: event.target.value }))}
                       className="rounded-2xl border border-input bg-background px-3 py-2 disabled:opacity-60"
                     />
                   </label>
 
                   <div className="flex flex-col gap-2 md:items-end">
-                    <span className="text-sm text-muted-foreground">
-                      {marketSettingsQuery.data.ufUpdatedAt ? `Actualizada: ${formatDateTime(marketSettingsQuery.data.ufUpdatedAt)}` : "Aun no se ha definido una UF para esta Tienda."}
-                    </span>
                     {isMarketAdmin ? (
-                      <button
-                        type="submit"
-                        disabled={updateMarketUfMutation.isPending}
-                        className="rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-                      >
-                        {updateMarketUfMutation.isPending ? "Guardando..." : "Guardar UF"}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        {!isEditingMarketUf ? (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingMarketUf(true)}
+                            className="rounded-2xl border border-border/70 bg-background px-4 py-3 text-sm font-semibold"
+                          >
+                            Editar UF
+                          </button>
+                        ) : (
+                          <button
+                            type="submit"
+                            disabled={updateMarketUfMutation.isPending}
+                            className="rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                          >
+                            {updateMarketUfMutation.isPending ? "Guardando..." : "Guardar UF"}
+                          </button>
+                        )}
+
+                        {marketSettingsQuery.data.ufManualOverride ? (
+                          <button
+                            type="button"
+                            disabled={resetMarketUfMutation.isPending}
+                            onClick={() => {
+                              setFeedback(null);
+                              resetMarketUfMutation.mutate();
+                            }}
+                            className="rounded-2xl border border-border/70 bg-background px-4 py-3 text-sm font-semibold disabled:opacity-50"
+                          >
+                            {resetMarketUfMutation.isPending ? "Actualizando..." : "Volver a automatico"}
+                          </button>
+                        ) : null}
+                      </div>
                     ) : (
-                      <span className="soft-chip">La UF se actualiza desde la Tienda.</span>
+                      <span className="soft-chip">La UF se administra desde el Espacio activo.</span>
                     )}
                   </div>
                 </div>

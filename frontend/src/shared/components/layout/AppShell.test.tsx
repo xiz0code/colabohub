@@ -22,7 +22,7 @@ afterEach(() => {
 describe("AppShell", () => {
   it("keeps Administrador General navigation visible across route changes", async () => {
     sessionMock.mockReturnValue({
-      user: { fullName: "Admin", marketIds: [], email: "admin@example.com" },
+      user: { fullName: "Admin", marketIds: [], storeIds: [], email: "admin@example.com", active: true, activeMarketId: null, activeMarketName: null },
       isLoading: false,
       roles: ["ADMIN_SYSTEM"],
       primaryRole: "ADMIN_SYSTEM",
@@ -33,25 +33,26 @@ describe("AppShell", () => {
     const user = userEvent.setup();
     renderShell("/dashboard");
 
-    expect(screen.getByText("Tiendas")).toBeInTheDocument();
+    expect(screen.getByText("Espacios")).toBeInTheDocument();
     expect(screen.getByText("Reportes")).toBeInTheDocument();
     expect(screen.getByText("Acceso global")).toBeInTheDocument();
+    expect(screen.getByText("Gestionar Espacios")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("link", { name: "Tiendas" }));
+    await user.click(screen.getByRole("link", { name: "Espacios" }));
 
+    expect(screen.getByText("Espacios")).toBeInTheDocument();
     expect(screen.getByText("Tiendas")).toBeInTheDocument();
-    expect(screen.getByText("Colaboradores")).toBeInTheDocument();
     expect(screen.getByText("Configuracion")).toBeInTheDocument();
     expect(screen.queryByText("Ventas")).not.toBeInTheDocument();
   });
 
-  it("keeps Administrador de Tienda navigation visible across route changes", async () => {
+  it("keeps Administrador de Espacio navigation visible across route changes", async () => {
     sessionMock.mockReturnValue({
-      user: { fullName: "Admin Tienda", marketIds: [2], email: "admin.tienda@example.com", activeMarketName: "Sakura Store" },
+      user: { fullName: "Admin Tienda", marketIds: [2], storeIds: [], email: "admin.tienda@example.com", active: true, activeMarketId: 2, activeMarketName: "Sakura Store" },
       isLoading: false,
       roles: ["ADMIN_MARKET"],
       primaryRole: "ADMIN_MARKET",
-      visibleRoleLabel: "Administrador de Tienda",
+      visibleRoleLabel: "Administrador de Espacio",
       logoutUrl: "/logout",
     });
 
@@ -60,24 +61,45 @@ describe("AppShell", () => {
 
     expect(screen.getByText("Ventas")).toBeInTheDocument();
     expect(screen.getByText("Stock")).toBeInTheDocument();
+    expect(screen.getByText("Cierres")).toBeInTheDocument();
     expect(screen.getByText("Nueva venta")).toBeInTheDocument();
     expect(screen.getByText("Sakura Store")).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "Stock" }));
 
-    expect(screen.getByText("Colaboradores")).toBeInTheDocument();
+    expect(screen.getByText("Tiendas")).toBeInTheDocument();
     expect(screen.getByText("Ventas")).toBeInTheDocument();
+    expect(screen.getByText("Cierres")).toBeInTheDocument();
     expect(screen.getByText("Configuracion")).toBeInTheDocument();
-    expect(screen.queryByText("Tiendas")).not.toBeInTheDocument();
+    expect(screen.queryByText("Espacios")).not.toBeInTheDocument();
+  });
+
+  it("shows the role label once and prioritizes the active market name in the header", () => {
+    sessionMock.mockReturnValue({
+      user: { fullName: "Karina Gonzalez", marketIds: [2], storeIds: [], email: "karina@example.com", active: true, activeMarketId: 2, activeMarketName: "Fast And Near" },
+      isLoading: false,
+      roles: ["ADMIN_MARKET"],
+      primaryRole: "ADMIN_MARKET",
+      visibleRoleLabel: "Administrador de Espacio",
+      logoutUrl: "/logout",
+    });
+
+    renderShell("/dashboard");
+
+    expect(screen.getByText("Fast And Near")).toBeInTheDocument();
+    expect(screen.getByText("Karina Gonzalez")).toBeInTheDocument();
+    expect(screen.getAllByText("Administrador de Espacio")).toHaveLength(1);
+    expect(screen.getByText(/Powered by Xizo Dev's/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Xizo Dev's" })).not.toBeInTheDocument();
   });
 
   it("keeps collaborator navigation visible across route changes", async () => {
     sessionMock.mockReturnValue({
-      user: { fullName: "Colaborador", marketIds: [3], email: "colab@example.com" },
+      user: { fullName: "Tienda Demo", marketIds: [3], storeIds: [8], email: "colab@example.com", active: true, activeMarketId: 3, activeMarketName: "Sakura Store" },
       isLoading: false,
       roles: ["STORE_USER"],
       primaryRole: "STORE_USER",
-      visibleRoleLabel: "Colaborador",
+      visibleRoleLabel: "Tienda",
       logoutUrl: "/logout",
     });
 
@@ -93,7 +115,7 @@ describe("AppShell", () => {
     expect(screen.getByText("Mis ventas")).toBeInTheDocument();
     expect(screen.getByText("Mi stock")).toBeInTheDocument();
     expect(screen.queryByText("Nueva venta")).not.toBeInTheDocument();
-    expect(screen.queryByText("Tiendas")).not.toBeInTheDocument();
+    expect(screen.queryByText("Espacios")).not.toBeInTheDocument();
   });
 
   it("shows stable loading placeholder instead of collapsing the menu", () => {
@@ -109,7 +131,7 @@ describe("AppShell", () => {
     renderShell("/dashboard");
 
     expect(screen.getByLabelText("Navegacion principal")).toBeInTheDocument();
-    expect(screen.queryByText("Tiendas")).not.toBeInTheDocument();
+    expect(screen.queryByText("Espacios")).not.toBeInTheDocument();
     expect(screen.queryByText("Ventas")).not.toBeInTheDocument();
   });
 });
@@ -120,13 +142,15 @@ function renderShell(initialEntry: string) {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<div>Dashboard page</div>} />
-          <Route path="/tiendas" element={<div>Tiendas page</div>} />
-          <Route path="/colaboradores" element={<div>Colaboradores page</div>} />
+          <Route path="/tiendas" element={<div>Espacios page</div>} />
+          <Route path="/colaboradores" element={<div>Tiendas page</div>} />
           <Route path="/sales" element={<div>Ventas page</div>} />
           <Route path="/sales/today" element={<div>Mis ventas page</div>} />
+          <Route path="/reports/collaborators" element={<div>Reportes tiendas page</div>} />
           <Route path="/products" element={<div>Stock page</div>} />
           <Route path="/inventory" element={<div>Mi stock page</div>} />
           <Route path="/closings" element={<div>Cierres page</div>} />
+          <Route path="/closings/monthly" element={<div>Cierres mensuales page</div>} />
           <Route path="/commissions" element={<div>Configuracion page</div>} />
         </Route>
       </Routes>

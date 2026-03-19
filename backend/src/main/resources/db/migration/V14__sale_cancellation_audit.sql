@@ -1,0 +1,8 @@
+ALTER TABLE sales
+ADD COLUMN cancelled_at TIMESTAMP NULL;
+
+ALTER TABLE sales
+ADD COLUMN cancelled_by VARCHAR(180) NULL;
+
+ALTER TABLE sales
+ADD COLUMN cancellation_reason VARCHAR(500) NULL;

@@ -61,6 +61,9 @@ public class Market extends BaseEntity {
     private Instant ufUpdatedAt;
 
     @Column(nullable = false)
+    private boolean ufManualOverride = false;
+
+    @Column(nullable = false)
     private boolean globalPromotionEnabled = false;
 
     @Column(precision = 5, scale = 2)

@@ -1,0 +1,2 @@
+ALTER TABLE markets
+ADD COLUMN uf_manual_override BOOLEAN NOT NULL DEFAULT FALSE;

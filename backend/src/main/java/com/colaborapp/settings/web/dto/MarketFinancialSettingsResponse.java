@@ -8,6 +8,8 @@ public record MarketFinancialSettingsResponse(
         String marketName,
         BigDecimal ufValue,
         Instant ufUpdatedAt,
+        boolean ufManualOverride,
+        boolean useDynamicFixedCommission,
         boolean overrideEnabled,
         BigDecimal globalCommissionUfValue,
         BigDecimal globalCommissionPercentageValue,

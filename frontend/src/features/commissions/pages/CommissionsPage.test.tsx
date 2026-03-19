@@ -9,8 +9,11 @@ vi.mock("@/features/auth/session/SessionProvider", () => ({
   useSession: () => ({
     primaryRole: "ADMIN_MARKET",
     user: {
+      active: true,
+      activeMarketId: 2,
       marketIds: [2],
       activeMarketName: "Sakura Store",
+      storeIds: [],
     },
   }),
 }));
@@ -22,6 +25,7 @@ vi.mock("@/features/commissions/api/settingsApi", () => ({
   updateGlobalUfValue: vi.fn(),
   updateMarketCommissionSettings: vi.fn(),
   updateMarketUfValue: vi.fn(),
+  resetMarketUfValueToAutomatic: vi.fn(),
 }));
 
 vi.mock("@/features/markets/api/marketApi", () => ({
@@ -30,6 +34,7 @@ vi.mock("@/features/markets/api/marketApi", () => ({
 
 import {
   getMarketFinancialSettings,
+  resetMarketUfValueToAutomatic,
   updateMarketCommissionSettings,
   updateMarketUfValue,
 } from "@/features/commissions/api/settingsApi";
@@ -43,6 +48,8 @@ describe("CommissionsPage", () => {
       marketName: "Sakura Store",
       ufValue: 36500,
       ufUpdatedAt: "2026-03-16T18:00:00.000Z",
+      ufManualOverride: true,
+      useDynamicFixedCommission: true,
       overrideEnabled: true,
       globalCommissionUfValue: 0.00169,
       globalCommissionPercentageValue: 0.0079,
@@ -57,6 +64,8 @@ describe("CommissionsPage", () => {
       marketName: "Sakura Store",
       ufValue: 36500,
       ufUpdatedAt: "2026-03-16T18:00:00.000Z",
+      ufManualOverride: true,
+      useDynamicFixedCommission: true,
       overrideEnabled: true,
       globalCommissionUfValue: 0.00169,
       globalCommissionPercentageValue: 0.0079,
@@ -71,6 +80,8 @@ describe("CommissionsPage", () => {
       marketName: "Sakura Store",
       ufValue: 37000,
       ufUpdatedAt: "2026-03-16T19:00:00.000Z",
+      ufManualOverride: true,
+      useDynamicFixedCommission: true,
       overrideEnabled: true,
       globalCommissionUfValue: 0.00169,
       globalCommissionPercentageValue: 0.0079,
@@ -103,13 +114,44 @@ describe("CommissionsPage", () => {
 
     expect(await screen.findByText("Valor UF de la Tienda")).toBeInTheDocument();
 
-    const ufInput = screen.getByLabelText("Valor UF");
-    fireEvent.change(ufInput, { target: { value: "37000" } });
+    await user.click(screen.getByRole("button", { name: "Editar UF" }));
+    const ufInput = screen.getAllByLabelText("Valor UF").find((input) => !input.hasAttribute("disabled"));
+    expect(ufInput).toBeDefined();
+    fireEvent.change(ufInput!, { target: { value: "37000" } });
     const saveButtons = screen.getAllByRole("button", { name: "Guardar UF" });
     await user.click(saveButtons[saveButtons.length - 1]);
 
     await waitFor(() => {
       expect(updateMarketUfValue).toHaveBeenCalledWith(37000);
+    });
+  });
+
+  it("allows returning the tienda UF to automatic mode", async () => {
+    vi.mocked(resetMarketUfValueToAutomatic).mockResolvedValue({
+      marketId: 2,
+      marketName: "Sakura Store",
+      ufValue: 37100,
+      ufUpdatedAt: "2026-03-16T20:00:00.000Z",
+      ufManualOverride: false,
+      useDynamicFixedCommission: true,
+      overrideEnabled: true,
+      globalCommissionUfValue: 0.00169,
+      globalCommissionPercentageValue: 0.0079,
+      effectiveCommissionUfValue: 0.002,
+      effectiveCommissionPercentageValue: 0.009,
+      globalPromotionEnabled: true,
+      globalPromotionPercentage: 25,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect((await screen.findAllByText("Estado: Manual")).length).toBeGreaterThan(0);
+    const automaticButtons = screen.getAllByRole("button", { name: "Volver a automatico" });
+    await user.click(automaticButtons[automaticButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(resetMarketUfValueToAutomatic).toHaveBeenCalled();
     });
   });
 });

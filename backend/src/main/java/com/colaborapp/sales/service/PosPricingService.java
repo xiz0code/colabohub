@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 
@@ -261,6 +262,48 @@ public class PosPricingService {
                         .map(item -> item.getStore().getMarket().getId())
                         .distinct()
                         .toList());
+        boolean useDynamicFixedCommission = commissionSettingsService.useDynamicFixedCommission();
+        BigDecimal safeUfValue = ufValue == null ? BigDecimal.ZERO : ufValue;
+        int totalLineCount = items.size();
+
+        Map<SaleItem, BigDecimal> fixedCommissionByItem = new HashMap<>();
+        if (appliesDebitCommissions(paymentMethod)) {
+            if (useDynamicFixedCommission) {
+                Map<CollaboratorKey, List<SaleItem>> itemsByCollaborator = items.stream()
+                        .collect(java.util.stream.Collectors.groupingBy(this::resolveCollaboratorKey));
+
+                for (List<SaleItem> collaboratorItems : itemsByCollaborator.values()) {
+                    Store store = collaboratorItems.getFirst().getStore();
+                    CommissionSettingsService.EffectiveCommissionConfig commissionConfig = commissionsByMarket.getOrDefault(
+                            store.getMarket().getId(),
+                            new CommissionSettingsService.EffectiveCommissionConfig(
+                                    CommissionSettingsService.DEFAULT_COMMISSION_UF,
+                                    CommissionSettingsService.DEFAULT_COMMISSION_PERCENTAGE));
+                    BigDecimal totalFixedCommission = roundClp(safeUfValue.multiply(commissionConfig.commissionUfValue()));
+                    List<BigDecimal> distributedCommissions = distributeClpAmount(totalFixedCommission, collaboratorItems.size());
+                    for (int index = 0; index < collaboratorItems.size(); index++) {
+                        fixedCommissionByItem.put(collaboratorItems.get(index), distributedCommissions.get(index));
+                    }
+                }
+            } else {
+                for (List<SaleItem> storeItems : itemsByStore.values()) {
+                    Store store = storeItems.getFirst().getStore();
+                    CommissionSettingsService.EffectiveCommissionConfig commissionConfig = commissionsByMarket.getOrDefault(
+                            store.getMarket().getId(),
+                            new CommissionSettingsService.EffectiveCommissionConfig(
+                                    CommissionSettingsService.DEFAULT_COMMISSION_UF,
+                                    CommissionSettingsService.DEFAULT_COMMISSION_PERCENTAGE));
+                    BigDecimal fixedCommission = totalLineCount == 0
+                            ? ZERO_CLP
+                            : roundClp(
+                                    safeUfValue.multiply(commissionConfig.commissionUfValue())
+                                            .divide(BigDecimal.valueOf(totalLineCount), MONEY_SCALE, HALF_UP));
+                    for (SaleItem storeItem : storeItems) {
+                        fixedCommissionByItem.put(storeItem, fixedCommission);
+                    }
+                }
+            }
+        }
 
         List<SaleStoreSummary> summaries = new ArrayList<>();
         for (List<SaleItem> storeItems : itemsByStore.values()) {
@@ -271,13 +314,6 @@ public class PosPricingService {
                     new CommissionSettingsService.EffectiveCommissionConfig(
                             CommissionSettingsService.DEFAULT_COMMISSION_UF,
                             CommissionSettingsService.DEFAULT_COMMISSION_PERCENTAGE));
-
-            BigDecimal commission1PerItem = ZERO_CLP;
-            if (appliesDebitCommissions(paymentMethod)) {
-                BigDecimal commission1StoreTotal = scale(ufValue.multiply(commissionConfig.commissionUfValue()));
-                commission1PerItem = roundClp(
-                        commission1StoreTotal.divide(BigDecimal.valueOf(lineCount), MONEY_SCALE, HALF_UP));
-            }
 
             BigDecimal subtotal = ZERO;
             BigDecimal commission1 = ZERO_CLP;
@@ -290,10 +326,11 @@ public class PosPricingService {
             for (SaleItem item : storeItems) {
                 unitCount += item.getQuantity();
                 if (appliesDebitCommissions(paymentMethod)) {
+                    BigDecimal commission1PerItem = fixedCommissionByItem.getOrDefault(item, ZERO_CLP);
                     BigDecimal commission2Amount = roundClp(item.getSubtotal().multiply(commissionConfig.commissionPercentageValue()));
                     BigDecimal vatAmount = roundClp(commission1PerItem.add(commission2Amount).multiply(VAT_RATE));
                     BigDecimal totalCommissionAmount = roundClp(commission1PerItem.add(commission2Amount).add(vatAmount));
-                    BigDecimal netAmount = scale(item.getSubtotal().subtract(totalCommissionAmount));
+                    BigDecimal netAmount = roundClp(item.getSubtotal().subtract(commission1PerItem).subtract(commission2Amount).subtract(vatAmount));
 
                     item.setCommission1Amount(commission1PerItem);
                     item.setCommission2Amount(commission2Amount);
@@ -329,7 +366,7 @@ public class PosPricingService {
             summary.setCommission2Amount(roundClp(commission2));
             summary.setCommissionIvaAmount(roundClp(commissionIva));
             summary.setTotalCommissionAmount(roundClp(totalCommission));
-            summary.setNetAmount(scale(net));
+            summary.setNetAmount(roundClp(net));
             summaries.add(summary);
         }
 
@@ -340,6 +377,41 @@ public class PosPricingService {
 
     private boolean appliesDebitCommissions(PaymentMethod paymentMethod) {
         return paymentMethod == PaymentMethod.DEBITO;
+    }
+
+    private CollaboratorKey resolveCollaboratorKey(SaleItem item) {
+        Long collaboratorId = item.getCollaboratorUserId();
+        if (collaboratorId == null && item.getProduct() != null && item.getProduct().getOwnerUser() != null) {
+            collaboratorId = item.getProduct().getOwnerUser().getId();
+        }
+        String collaboratorName = item.getCollaboratorNameSnapshot();
+        if (collaboratorName == null && item.getProduct() != null && item.getProduct().getOwnerUser() != null) {
+            collaboratorName = item.getProduct().getOwnerUser().getFullName();
+        }
+
+        if (collaboratorId != null) {
+            return new CollaboratorKey("USER", collaboratorId, collaboratorName);
+        }
+
+        return new CollaboratorKey("STORE", item.getStore().getId(), item.getStore().getName());
+    }
+
+    private List<BigDecimal> distributeClpAmount(BigDecimal totalAmount, int parts) {
+        if (parts <= 0) {
+            return List.of();
+        }
+
+        BigDecimal roundedTotal = roundClp(totalAmount);
+        long total = roundedTotal.longValue();
+        long base = total / parts;
+        long remainder = total % parts;
+
+        List<BigDecimal> result = new ArrayList<>(parts);
+        for (int index = 0; index < parts; index++) {
+            long share = base + (index < remainder ? 1 : 0);
+            result.add(BigDecimal.valueOf(share).setScale(CLP_SCALE, HALF_UP));
+        }
+        return result;
     }
 
     private BigDecimal scale(BigDecimal value) {
@@ -379,5 +451,16 @@ public class PosPricingService {
             int unitCount,
             BigDecimal globalPromotionPercentage,
             ProductPromotion percentagePromotion) {
+    }
+
+    private record CollaboratorKey(
+            String scope,
+            Long id,
+            String name) {
+
+        private CollaboratorKey {
+            Objects.requireNonNull(scope);
+            Objects.requireNonNull(id);
+        }
     }
 }

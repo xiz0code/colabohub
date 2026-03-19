@@ -7,5 +7,7 @@ target/
 .DS_Store
 *.iml
 *.log
+*.tsbuildinfo
 backend/.mvn/
+backend/.data/
 frontend/.vite/

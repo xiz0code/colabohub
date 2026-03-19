@@ -1,5 +1,7 @@
 package com.colaborapp.users.domain;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -48,6 +50,17 @@ public class User {
 
     @Column(length = 500)
     private String description;
+
+    @Column(precision = 19, scale = 2)
+    private BigDecimal monthlyRent;
+
+    private LocalDate startDate;
+
+    @Column(length = 80)
+    private String standNumber;
+
+    @Column(nullable = false)
+    private boolean factura = false;
 
     @Column(nullable = false, length = 40)
     private String authProvider;

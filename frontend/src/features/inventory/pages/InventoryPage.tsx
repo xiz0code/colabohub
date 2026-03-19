@@ -175,7 +175,7 @@ export function InventoryPage() {
             <div className="soft-surface p-6">
               <h2 className="text-lg font-semibold">Modo lectura</h2>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Como Colaborador solo puedes consultar productos, stock e historial dentro de tu alcance permitido.
+                Como Tienda solo puedes consultar productos, stock e historial dentro de tu alcance permitido.
               </p>
             </div>
           )}

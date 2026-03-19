@@ -26,11 +26,13 @@ export function AppRouter() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/sales/today" element={<SalesTodayPage />} />
+          <Route path="/reports/collaborators" element={<SalesTodayPage defaultTab="collaborators" />} />
           <Route path="/stores" element={<Navigate to="/colaboradores" replace />} />
 
           <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM"]} />}>
             <Route path="/tiendas" element={<MarketsPage />} />
             <Route path="/closings" element={<DailyClosingPage />} />
+            <Route path="/closings/monthly" element={<DailyClosingPage defaultMode="monthly" />} />
           </Route>
 
           <Route element={<RequireRole allowedRoles={["ADMIN_MARKET"]} />}>

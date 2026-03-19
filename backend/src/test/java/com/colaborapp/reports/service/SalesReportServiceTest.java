@@ -19,6 +19,7 @@ import com.colaborapp.markets.repository.MarketRepository;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.sales.domain.Sale;
+import com.colaborapp.sales.domain.SaleItem;
 import com.colaborapp.sales.domain.SaleStatus;
 import com.colaborapp.sales.domain.SaleStoreSummary;
 import com.colaborapp.sales.repository.SaleItemRepository;
@@ -28,7 +29,10 @@ import com.colaborapp.security.AccessControlService;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.stores.repository.StoreRepository;
 import com.colaborapp.tenant.domain.Tenant;
+import com.colaborapp.users.domain.Role;
 import com.colaborapp.users.domain.RoleCode;
+import com.colaborapp.users.domain.User;
+import com.colaborapp.users.repository.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
 class SalesReportServiceTest {
@@ -52,6 +56,9 @@ class SalesReportServiceTest {
     private ProductRepository productRepository;
 
     @Mock
+    private UserRepository userRepository;
+
+    @Mock
     private CurrentTenantProvider currentTenantProvider;
 
     @Mock
@@ -59,6 +66,7 @@ class SalesReportServiceTest {
 
     private SalesReportService salesReportService;
     private Tenant tenant;
+    private User collaborator;
 
     @BeforeEach
     void setUp() {
@@ -69,12 +77,23 @@ class SalesReportServiceTest {
                 storeRepository,
                 marketRepository,
                 productRepository,
+                userRepository,
                 currentTenantProvider,
                 accessControlService,
                 "America/Santiago");
 
         tenant = new Tenant();
         tenant.setId(1L);
+
+        collaborator = new User();
+        collaborator.setId(7L);
+        collaborator.setFullName("Camila");
+        Market collaboratorMarket = new Market();
+        collaboratorMarket.setId(1L);
+        collaborator.getMarkets().add(collaboratorMarket);
+        Role collaboratorRole = new Role();
+        collaboratorRole.setCode(RoleCode.STORE_USER);
+        collaborator.getRoles().add(collaboratorRole);
     }
 
     @Test
@@ -131,6 +150,31 @@ class SalesReportServiceTest {
         assertThat(response.stores()).extracting(store -> store.storeId()).containsExactly(10L);
     }
 
+    @Test
+    void collaboratorSalesReportReturnsEntriesAndTotals() {
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)).thenReturn(true);
+        when(userRepository.findWithAccessById(7L)).thenReturn(java.util.Optional.of(collaborator));
+        when(saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(SaleStatus.CONFIRMED),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(item("Sticker BTS", 2, "4000.0000", "200.0000", "3800.0000")));
+
+        var response = salesReportService.getCollaboratorSalesReport(
+                7L,
+                java.time.LocalDate.of(2026, 3, 15),
+                java.time.LocalDate.of(2026, 3, 15));
+
+        assertThat(response.collaboratorName()).isEqualTo("Camila");
+        assertThat(response.entries()).hasSize(1);
+        assertThat(response.totalAmount()).isEqualByComparingTo("4000.0000");
+        assertThat(response.totalCommissionAmount()).isEqualByComparingTo("200.0000");
+        assertThat(response.totalNetAmount()).isEqualByComparingTo("3800.0000");
+    }
+
     private SaleStoreSummary summary(
             Long saleId,
             String saleNumber,
@@ -171,5 +215,38 @@ class SalesReportServiceTest {
         summary.setTotalCommissionAmount(new BigDecimal(commission));
         summary.setNetAmount(new BigDecimal(net));
         return summary;
+    }
+
+    private SaleItem item(String productName, int quantity, String subtotal, String commission, String net) {
+        Tenant currentTenant = tenant;
+
+        Market market = new Market();
+        market.setId(1L);
+        market.setTenant(currentTenant);
+
+        Store store = new Store();
+        store.setId(10L);
+        store.setName("Tienda A");
+        store.setMarket(market);
+        store.setTenant(currentTenant);
+
+        Sale sale = new Sale();
+        sale.setId(500L);
+        sale.setTenant(currentTenant);
+        sale.setSaleNumber("S-500");
+        sale.setStatus(SaleStatus.CONFIRMED);
+        sale.setConfirmedAt(Instant.parse("2026-03-15T14:00:00Z"));
+
+        SaleItem item = new SaleItem();
+        item.setSale(sale);
+        item.setStore(store);
+        item.setCollaboratorUserId(7L);
+        item.setCollaboratorNameSnapshot("Camila");
+        item.setProductNameSnapshot(productName);
+        item.setQuantity(quantity);
+        item.setSubtotal(new BigDecimal(subtotal));
+        item.setTotalCommissionAmount(new BigDecimal(commission));
+        item.setNetAmount(new BigDecimal(net));
+        return item;
     }
 }

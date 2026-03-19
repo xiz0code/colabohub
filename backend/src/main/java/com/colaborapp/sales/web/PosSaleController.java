@@ -15,12 +15,14 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.colaborapp.sales.service.PosSaleService;
+import com.colaborapp.sales.web.dto.CancelSaleRequest;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
 import com.colaborapp.sales.web.dto.PosPaymentMethodUpdateRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemScanRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemUpdateRequest;
 import com.colaborapp.sales.web.dto.PosSaleResponse;
+import com.colaborapp.sales.web.dto.PosSaleSummaryResponse;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +40,11 @@ public class PosSaleController {
     @ResponseStatus(HttpStatus.CREATED)
     public PosSaleResponse createSale(@RequestBody(required = false) CreatePosSaleRequest request) {
         return posSaleService.createSale(request);
+    }
+
+    @GetMapping
+    public java.util.List<PosSaleSummaryResponse> listSales() {
+        return posSaleService.listSales();
     }
 
     @GetMapping("/open")
@@ -91,7 +98,7 @@ public class PosSaleController {
     }
 
     @PostMapping("/{saleId}/cancel")
-    public PosSaleResponse cancel(@PathVariable Long saleId) {
-        return posSaleService.cancel(saleId);
+    public PosSaleResponse cancel(@PathVariable Long saleId, @Valid @RequestBody CancelSaleRequest request) {
+        return posSaleService.cancel(saleId, request.reason());
     }
 }

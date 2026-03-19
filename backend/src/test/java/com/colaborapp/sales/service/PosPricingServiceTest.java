@@ -28,6 +28,7 @@ import com.colaborapp.stores.domain.Store;
 import com.colaborapp.stores.domain.StoreStatus;
 import com.colaborapp.stores.domain.StoreType;
 import com.colaborapp.tenant.domain.Tenant;
+import com.colaborapp.users.domain.User;
 
 @ExtendWith(MockitoExtension.class)
 class PosPricingServiceTest {
@@ -43,6 +44,8 @@ class PosPricingServiceTest {
     private Market market;
     private Store storeAna;
     private Store storeLucia;
+    private User collaboratorAna;
+    private User collaboratorLucia;
 
     @BeforeEach
     void setUp() {
@@ -61,18 +64,21 @@ class PosPricingServiceTest {
 
         storeAna = store(1L, "Tienda Ana");
         storeLucia = store(2L, "Tienda Lucia");
+        collaboratorAna = collaborator(1000L, "Ana");
+        collaboratorLucia = collaborator(1001L, "Lucia");
 
         when(commissionSettingsService.getEffectiveCommissionConfig(List.of(10L))).thenReturn(
                 java.util.Map.of(10L, new CommissionSettingsService.EffectiveCommissionConfig(
                         CommissionSettingsService.DEFAULT_COMMISSION_UF,
                         CommissionSettingsService.DEFAULT_COMMISSION_PERCENTAGE)));
+        when(commissionSettingsService.useDynamicFixedCommission()).thenReturn(true);
     }
 
     @Test
     void shouldApplyCommissionsForDebito() {
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
 
-        SaleItem item = saleItem(product(100L, storeAna, "Producto A", new BigDecimal("10000.00")), 1);
+        SaleItem item = saleItem(product(100L, storeAna, collaboratorAna, "Producto A", new BigDecimal("10000.00")), 1);
 
         PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
                 List.of(item),
@@ -91,7 +97,7 @@ class PosPricingServiceTest {
     void shouldLeaveCommissionsInZeroForNonDebito() {
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
 
-        SaleItem item = saleItem(product(101L, storeAna, "Producto A", new BigDecimal("10000.00")), 2);
+        SaleItem item = saleItem(product(101L, storeAna, collaboratorAna, "Producto A", new BigDecimal("10000.00")), 2);
 
         PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
                 List.of(item),
@@ -107,34 +113,39 @@ class PosPricingServiceTest {
     }
 
     @Test
-    void shouldCalculateCommission1PerStoreUsingOnlyItemsFromThatStore() {
+    void shouldCalculateCommission1PerCollaboratorUsingDistinctProductsInSale() {
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
 
-        SaleItem anaItemOne = saleItem(product(201L, storeAna, "Aro Flor", new BigDecimal("10000.00")), 1);
-        SaleItem anaItemTwo = saleItem(product(202L, storeAna, "Pulsera Rosa", new BigDecimal("12000.00")), 1);
-        SaleItem luciaItem = saleItem(product(203L, storeLucia, "Collar Luna", new BigDecimal("8000.00")), 1);
+        SaleItem anaItemOne = saleItem(product(201L, storeAna, collaboratorAna, "Aro Flor", new BigDecimal("10000.00")), 1);
+        SaleItem anaItemTwo = saleItem(product(202L, storeAna, collaboratorAna, "Pulsera Rosa", new BigDecimal("12000.00")), 1);
+        SaleItem luciaItem = saleItem(product(203L, storeLucia, collaboratorLucia, "Collar Luna", new BigDecimal("8000.00")), 1);
 
         PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
                 List.of(anaItemOne, anaItemTwo, luciaItem),
                 PaymentMethod.DEBITO,
-                new BigDecimal("10000.00"));
+                new BigDecimal("39053.25"));
 
-        assertThat(anaItemOne.getCommission1Amount()).isEqualByComparingTo("8");
-        assertThat(anaItemTwo.getCommission1Amount()).isEqualByComparingTo("8");
-        assertThat(luciaItem.getCommission1Amount()).isEqualByComparingTo("17");
+        assertThat(anaItemOne.getCommission1Amount()).isEqualByComparingTo("33");
+        assertThat(anaItemTwo.getCommission1Amount()).isEqualByComparingTo("33");
+        assertThat(luciaItem.getCommission1Amount()).isEqualByComparingTo("66");
         assertThat(result.summaries()).hasSize(2);
         assertThat(result.summaries().stream()
                 .filter(summary -> summary.getStore().getId().equals(storeAna.getId()))
                 .findFirst()
                 .orElseThrow()
-                .getCommission1Amount()).isEqualByComparingTo("16");
+                .getCommission1Amount()).isEqualByComparingTo("66");
+        assertThat(result.summaries().stream()
+                .filter(summary -> summary.getStore().getId().equals(storeLucia.getId()))
+                .findFirst()
+                .orElseThrow()
+                .getCommission1Amount()).isEqualByComparingTo("66");
     }
 
     @Test
     void shouldRoundClpCommissionsUsingHalfUpScaleZero() {
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
 
-        SaleItem item = saleItem(product(301L, storeAna, "Producto A", new BigDecimal("500.00")), 1);
+        SaleItem item = saleItem(product(301L, storeAna, collaboratorAna, "Producto A", new BigDecimal("500.00")), 1);
 
         posPricingService.calculateSalePricing(
                 List.of(item),
@@ -150,16 +161,33 @@ class PosPricingServiceTest {
     }
 
     @Test
+    void shouldDistributeFixedCommissionAcrossWholeSaleWhenDynamicModeIsDisabled() {
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
+        when(commissionSettingsService.useDynamicFixedCommission()).thenReturn(false);
+
+        SaleItem anaItem = saleItem(product(501L, storeAna, collaboratorAna, "Aro Flor", new BigDecimal("10000.00")), 1);
+        SaleItem luciaItem = saleItem(product(502L, storeLucia, collaboratorLucia, "Collar Luna", new BigDecimal("8000.00")), 1);
+
+        posPricingService.calculateSalePricing(
+                List.of(anaItem, luciaItem),
+                PaymentMethod.DEBITO,
+                new BigDecimal("10000.00"));
+
+        assertThat(anaItem.getCommission1Amount()).isEqualByComparingTo("8");
+        assertThat(luciaItem.getCommission1Amount()).isEqualByComparingTo("8");
+    }
+
+    @Test
     void shouldApplyPercentagePromotionWhenNoGlobalPromotionExists() {
         ProductPromotion promotion = new ProductPromotion();
         promotion.setId(11L);
-        promotion.setProduct(product(401L, storeAna, "Sticker BTS", new BigDecimal("2000.00")));
+        promotion.setProduct(product(401L, storeAna, collaboratorAna, "Sticker BTS", new BigDecimal("2000.00")));
         promotion.setType(PromotionType.PERCENTAGE_DISCOUNT);
         promotion.setPercentageDiscount(new BigDecimal("30.00"));
         promotion.setName("30% descuento");
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotion));
 
-        SaleItem item = saleItem(product(401L, storeAna, "Sticker BTS", new BigDecimal("2000.00")), 2);
+        SaleItem item = saleItem(product(401L, storeAna, collaboratorAna, "Sticker BTS", new BigDecimal("2000.00")), 2);
 
         PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
                 List.of(item),
@@ -179,14 +207,14 @@ class PosPricingServiceTest {
 
         ProductPromotion promotion = new ProductPromotion();
         promotion.setId(12L);
-        promotion.setProduct(product(402L, storeAna, "Llaveros", new BigDecimal("2000.00")));
+        promotion.setProduct(product(402L, storeAna, collaboratorAna, "Llaveros", new BigDecimal("2000.00")));
         promotion.setType(PromotionType.QUANTITY_BLOCK);
         promotion.setBlockQuantity(3);
         promotion.setBlockPrice(new BigDecimal("4000.00"));
         promotion.setName("3 x 4000");
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotion));
 
-        SaleItem item = saleItem(product(402L, storeAna, "Llaveros", new BigDecimal("2000.00")), 3);
+        SaleItem item = saleItem(product(402L, storeAna, collaboratorAna, "Llaveros", new BigDecimal("2000.00")), 3);
 
         posPricingService.calculateSalePricing(List.of(item), PaymentMethod.CASH, null);
 
@@ -207,11 +235,20 @@ class PosPricingServiceTest {
         return store;
     }
 
-    private Product product(Long id, Store store, String name, BigDecimal price) {
+    private User collaborator(Long id, String fullName) {
+        User user = new User();
+        user.setId(id);
+        user.setFullName(fullName);
+        user.setEmail(fullName.toLowerCase() + "@example.com");
+        return user;
+    }
+
+    private Product product(Long id, Store store, User ownerUser, String name, BigDecimal price) {
         Product product = new Product();
         product.setId(id);
         product.setTenant(tenant);
         product.setStore(store);
+        product.setOwnerUser(ownerUser);
         product.setName(name);
         product.setSku(name.toUpperCase().replace(" ", "-"));
         product.setBarcode("7500000000" + id);
@@ -232,6 +269,8 @@ class PosPricingServiceTest {
         item.setProduct(product);
         item.setStore(product.getStore());
         item.setProductNameSnapshot(product.getName());
+        item.setCollaboratorUserId(product.getOwnerUser() != null ? product.getOwnerUser().getId() : null);
+        item.setCollaboratorNameSnapshot(product.getOwnerUser() != null ? product.getOwnerUser().getFullName() : null);
         item.setProductSkuSnapshot(product.getSku());
         item.setProductBarcodeSnapshot(product.getBarcode());
         item.setQuantity(quantity);

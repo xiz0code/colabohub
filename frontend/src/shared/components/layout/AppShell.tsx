@@ -1,46 +1,48 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
+import { BrandMark } from "@/shared/components/branding/BrandMark";
 import { RoleBadge } from "@/shared/components/ui/RoleBadge";
 import { getNavigationItems } from "@/shared/lib/auth/navigation";
+import { APP_BRANDING } from "@/shared/lib/branding";
 
 export function AppShell() {
   const { user, isLoading, logoutUrl, primaryRole, visibleRoleLabel } = useSession();
   const canOperatePos = primaryRole === "ADMIN_MARKET";
+  const contextualCta =
+    primaryRole === "ADMIN_SYSTEM"
+      ? { to: "/tiendas", label: "Gestionar Espacios" }
+      : canOperatePos
+        ? { to: "/sales", label: "Nueva venta" }
+        : null;
   const visibleNavItems = getNavigationItems(primaryRole);
   const marketSummary =
     primaryRole === "ADMIN_SYSTEM"
       ? "Acceso global"
       : user?.activeMarketName
         ? user.activeMarketName
-      : user?.marketIds?.length
-        ? user.marketIds.length === 1
-          ? "Tu Tienda activa"
-          : `${user.marketIds.length} Tiendas asignadas`
-        : "Sin Tienda asignada";
+        : "Sin Espacio asignado";
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b border-white/80 bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-5">
               <Link to="/dashboard" className="flex items-center gap-3">
-                <span className="inline-flex h-12 w-12 items-center justify-center rounded-[20px] bg-[linear-gradient(135deg,rgba(255,211,229,0.96),rgba(201,212,255,0.98))] text-sm font-extrabold text-fuchsia-950 shadow-[0_16px_30px_rgba(188,161,219,0.22)]">
-                  Co
-                </span>
+                <BrandMark />
                 <div>
-                  <p className="text-lg font-semibold tracking-tight">ColaboHub</p>
-                  <p className="text-sm text-muted-foreground">La plataforma suave para Tiendas creativas colaborativas</p>
+                  <p className="text-lg font-semibold tracking-tight">{APP_BRANDING.name}</p>
+                  <p className="text-sm text-muted-foreground">{APP_BRANDING.tagline}</p>
                 </div>
               </Link>
 
-              {canOperatePos ? (
+              {contextualCta ? (
                 <Link
-                  to="/sales"
-                  className="inline-flex items-center justify-center rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96),rgba(255,204,181,0.92))] px-6 py-3 text-base font-semibold text-white shadow-[0_16px_32px_rgba(186,153,228,0.26)] transition duration-200 hover:scale-[1.03] hover:-translate-y-0.5"
+                  to={contextualCta.to}
+                  className="inline-flex min-h-14 items-center justify-center rounded-[24px] bg-[linear-gradient(135deg,rgba(177,146,239,1),rgba(242,157,206,0.98),rgba(255,196,170,0.96))] px-7 py-3 text-base font-bold text-white shadow-[0_18px_34px_rgba(184,150,228,0.3)] transition duration-200 hover:scale-[1.03] hover:-translate-y-0.5 hover:shadow-[0_20px_38px_rgba(184,150,228,0.36)]"
                 >
-                  Nueva venta
+                  {contextualCta.label}
                 </Link>
               ) : null}
             </div>
@@ -52,16 +54,11 @@ export function AppShell() {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{user?.fullName ?? user?.email ?? "Sesion activa"}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="soft-chip">{marketSummary}</span>
-                    <span className="soft-chip bg-[linear-gradient(135deg,rgba(255,248,227,0.96),rgba(255,255,255,0.92))] text-amber-700">
-                      {visibleRoleLabel}
-                    </span>
-                  </div>
+                  <p className="truncate text-lg font-semibold tracking-tight text-slate-900">{marketSummary}</p>
+                  <p className="mt-1 truncate text-sm font-medium text-slate-700">{user?.fullName ?? user?.email ?? "Sesion activa"}</p>
                 </div>
 
-                <div className="hidden shrink-0 sm:block">
+                <div className="hidden shrink-0 sm:block self-center">
                   <RoleBadge role={primaryRole} />
                 </div>
               </div>
@@ -107,11 +104,17 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
         <div className="min-w-0">
           <Outlet />
         </div>
       </main>
+
+      <footer className="border-t border-white/60 bg-background/40">
+        <div className="mx-auto max-w-7xl px-4 py-5 text-center text-xs text-slate-500 sm:px-6 lg:px-8">
+          <span>&copy; 2026 {APP_BRANDING.name} · Powered by Xizo Dev&apos;s</span>
+        </div>
+      </footer>
     </div>
   );
 }

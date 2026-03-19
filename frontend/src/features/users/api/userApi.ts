@@ -9,6 +9,9 @@ export type AppUser = {
   phone: string | null;
   contactName: string | null;
   description: string | null;
+  monthlyRent: number | null;
+  startDate: string | null;
+  standNumber: string | null;
   roles: string[];
   marketIds: number[];
   storeIds: number[];
@@ -23,6 +26,9 @@ export type UpsertUserInput = {
   phone?: string;
   contactName?: string;
   description?: string;
+  monthlyRent?: number;
+  startDate?: string;
+  standNumber?: string;
   role: UserRole;
   marketIds?: number[];
   storeIds?: number[];

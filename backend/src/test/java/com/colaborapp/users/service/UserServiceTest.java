@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -110,6 +112,10 @@ class UserServiceTest {
                 "+56999999999",
                 "Jefe Local",
                 "Apoyo en ventas",
+                new BigDecimal("120000.00"),
+                LocalDate.of(2026, 3, 1),
+                "Stand 12",
+                false,
                 RoleCode.STORE_USER,
                 List.of(7L),
                 List.of(15L),
@@ -118,6 +124,9 @@ class UserServiceTest {
         assertThat(response.id()).isEqualTo(100L);
         assertThat(response.roles()).containsExactly("STORE_USER");
         assertThat(response.marketIds()).containsExactly(7L);
+        assertThat(response.monthlyRent()).isEqualByComparingTo("120000.00");
+        assertThat(response.startDate()).isEqualTo(LocalDate.of(2026, 3, 1));
+        assertThat(response.standNumber()).isEqualTo("Stand 12");
     }
 
     @Test
@@ -131,6 +140,10 @@ class UserServiceTest {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                false,
                 RoleCode.ADMIN_MARKET,
                 List.of(7L),
                 List.of(),
@@ -153,6 +166,10 @@ class UserServiceTest {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                false,
                 RoleCode.STORE_USER,
                 List.of(8L),
                 List.of(),

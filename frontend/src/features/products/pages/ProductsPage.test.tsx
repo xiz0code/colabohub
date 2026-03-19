@@ -8,7 +8,10 @@ import { ProductsPage } from "@/features/products/pages/ProductsPage";
 vi.mock("@/features/auth/session/SessionProvider", () => ({
   useSession: () => ({
     user: {
+      active: true,
+      activeMarketId: 2,
       marketIds: [2],
+      storeIds: [5],
       activeMarketName: "Sakura Store",
     },
   }),
@@ -20,6 +23,7 @@ vi.mock("@/features/products/api/productApi", () => ({
   updateProduct: vi.fn(),
   getProductAudit: vi.fn(),
   printBarcodeLabels: vi.fn(),
+  importProductsCsv: vi.fn(),
 }));
 
 vi.mock("@/features/users/api/userApi", () => ({
@@ -29,6 +33,7 @@ vi.mock("@/features/users/api/userApi", () => ({
 import {
   createProduct,
   getProductAudit,
+  importProductsCsv,
   listProducts,
   printBarcodeLabels,
   updateProduct,
@@ -87,6 +92,9 @@ describe("ProductsPage", () => {
         phone: null,
         contactName: null,
         description: null,
+        monthlyRent: null,
+        startDate: null,
+        standNumber: null,
         roles: ["STORE_USER"],
         marketIds: [2],
         storeIds: [5],
@@ -148,13 +156,24 @@ describe("ProductsPage", () => {
     });
 
     vi.mocked(printBarcodeLabels).mockResolvedValue(new Blob(["pdf"]));
+    vi.mocked(importProductsCsv).mockResolvedValue({
+      successCount: 2,
+      errorCount: 1,
+      errors: [
+        {
+          rowNumber: 3,
+          rowData: "Album TXT,0,2,Precio invalido,camila@example.com,,",
+          message: "El precio debe ser un numero mayor a 0.",
+        },
+      ],
+    });
     vi.stubGlobal("URL", {
       createObjectURL: vi.fn(() => "blob:url"),
       revokeObjectURL: vi.fn(),
     });
   });
 
-  it("creates products from a modal without tienda selector", async () => {
+  it("creates products from a modal without espacio selector", async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -162,10 +181,10 @@ describe("ProductsPage", () => {
     await user.click(screen.getByRole("button", { name: "Crear producto" }));
 
     expect(screen.getByRole("heading", { name: "Crear producto" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Tienda")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Espacio")).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Nombre del producto"), "Llavero TXT");
-    await user.selectOptions(screen.getByLabelText("Colaborador responsable"), "7");
+    await user.selectOptions(screen.getByLabelText("Tienda responsable"), "7");
     await user.type(screen.getByLabelText("Precio de venta"), "3500");
     await user.clear(screen.getByLabelText("Stock inicial"));
     await user.type(screen.getByLabelText("Stock inicial"), "8");
@@ -210,6 +229,32 @@ describe("ProductsPage", () => {
 
     expect(screen.getByRole("heading", { name: "Imprimir codigos de barras" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("1")).toBeInTheDocument();
+  });
+
+  it("imports products from csv and shows row level results", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("button", { name: "Carga masiva" });
+    await user.click(screen.getByRole("button", { name: "Carga masiva" }));
+
+    const input = screen.getByLabelText("Archivo CSV");
+    const file = new File(
+      ["nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor\nSticker BTS,2000,6,Pack brillante,camila@example.com,,"],
+      "productos.csv",
+      { type: "text/csv" },
+    );
+
+    await user.upload(input, file);
+    await user.click(screen.getByRole("button", { name: "Procesar archivo" }));
+
+    await waitFor(() => {
+      expect(importProductsCsv).toHaveBeenCalledWith(expect.any(File));
+    });
+
+    expect(await screen.findByText("Productos creados")).toBeInTheDocument();
+    expect(screen.getByText("Fila 3")).toBeInTheDocument();
+    expect(screen.getByText("El precio debe ser un numero mayor a 0.")).toBeInTheDocument();
   });
 });
 

@@ -8,17 +8,18 @@ export type AppNavItem = {
 const navItemsByRole: Record<AppRole, AppNavItem[]> = {
   ADMIN_SYSTEM: [
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/tiendas", label: "Tiendas" },
-    { to: "/colaboradores", label: "Colaboradores" },
-    { to: "/sales/today", label: "Reportes" },
+    { to: "/tiendas", label: "Espacios" },
+    { to: "/colaboradores", label: "Tiendas" },
+    { to: "/reports/collaborators", label: "Reportes" },
     { to: "/closings", label: "Cierres" },
     { to: "/commissions", label: "Configuracion" },
   ],
   ADMIN_MARKET: [
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/colaboradores", label: "Colaboradores" },
+    { to: "/colaboradores", label: "Tiendas" },
     { to: "/sales", label: "Ventas" },
     { to: "/products", label: "Stock" },
+    { to: "/closings", label: "Cierres" },
     { to: "/commissions", label: "Configuracion" },
   ],
   STORE_USER: [
@@ -28,7 +29,7 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
   ],
   COLLABORATOR: [
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/colaboradores", label: "Colaboradores" },
+    { to: "/colaboradores", label: "Tiendas" },
     { to: "/sales", label: "Ventas" },
     { to: "/products", label: "Stock" },
   ],

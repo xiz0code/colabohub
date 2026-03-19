@@ -63,6 +63,12 @@ class DailyClosingServiceTest {
     @Mock
     private DailyClosingEmailService dailyClosingEmailService;
 
+    @Mock
+    private CollaboratorSalesSummaryService collaboratorSalesSummaryService;
+
+    @Mock
+    private CollaboratorClosingEmailService collaboratorClosingEmailService;
+
     private DailyClosingService dailyClosingService;
 
     private Tenant tenant;
@@ -89,6 +95,8 @@ class DailyClosingServiceTest {
                 storeRepository,
                 currentTenantProvider,
                 dailyClosingEmailService,
+                collaboratorSalesSummaryService,
+                collaboratorClosingEmailService,
                 "America/Santiago");
     }
 
@@ -105,6 +113,7 @@ class DailyClosingServiceTest {
                         new Object[] {12L, "Tienda Lucia", 1L, new BigDecimal("15000.0000"), new BigDecimal("1300.0000"), new BigDecimal("13700.0000"), 1L}));
         when(storeRepository.getReferenceById(11L)).thenReturn(store(11L, "Tienda Ana"));
         when(storeRepository.getReferenceById(12L)).thenReturn(store(12L, "Tienda Lucia"));
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
         when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> {
             DailyClosing closing = invocation.getArgument(0);
             closing.setId(90L);
@@ -173,6 +182,7 @@ class DailyClosingServiceTest {
                         new Object[] {12L, "Tienda Maria", 1L, new BigDecimal("15000.0000"), new BigDecimal("1000.0000"), new BigDecimal("14000.0000"), 1L}));
         when(storeRepository.getReferenceById(11L)).thenReturn(store(11L, "Tienda Ana"));
         when(storeRepository.getReferenceById(12L)).thenReturn(store(12L, "Tienda Maria"));
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
         when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> {
             DailyClosing closing = invocation.getArgument(0);
             closing.setId(92L);
@@ -200,6 +210,7 @@ class DailyClosingServiceTest {
                 .thenReturn(List.<Object[]>of(
                         new Object[] {11L, "Tienda Ana", 1L, new BigDecimal("12000.0000"), new BigDecimal("900.0000"), new BigDecimal("11100.0000"), 1L}));
         when(storeRepository.getReferenceById(11L)).thenReturn(store(11L, "Tienda Ana"));
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
         when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> {
             DailyClosing closing = invocation.getArgument(0);
             closing.setId(94L);
@@ -224,6 +235,7 @@ class DailyClosingServiceTest {
                 .thenReturn(List.<Object[]>of(
                         new Object[] {11L, "Tienda Ana", 2L, new BigDecimal("26000.0000"), new BigDecimal("1800.0000"), new BigDecimal("24200.0000"), 2L}));
         when(storeRepository.getReferenceById(11L)).thenReturn(store(11L, "Tienda Ana"));
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
         when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> {
             DailyClosing closing = invocation.getArgument(0);
             closing.setId(95L);
@@ -250,6 +262,7 @@ class DailyClosingServiceTest {
                         new Object[] {12L, "Tienda Lucia", 1L, new BigDecimal("15000.0000"), new BigDecimal("1300.0000"), new BigDecimal("13700.0000"), 1L}));
         when(storeRepository.getReferenceById(11L)).thenReturn(store(11L, "Tienda Ana"));
         when(storeRepository.getReferenceById(12L)).thenReturn(store(12L, "Tienda Lucia"));
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
         when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> {
             DailyClosing closing = invocation.getArgument(0);
             closing.setId(96L);
@@ -272,6 +285,7 @@ class DailyClosingServiceTest {
         when(saleStoreSummaryRepository.summarizeClosingTotals(any(), any(), any(), any(), any()))
                 .thenReturn(new Object[] {0L, new BigDecimal("0.0000"), new BigDecimal("0.0000"), new BigDecimal("0.0000")});
         when(saleStoreSummaryRepository.summarizeClosingStores(any(), any(), any(), any(), any())).thenReturn(List.of());
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
         when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> {
             DailyClosing closing = invocation.getArgument(0);
             closing.setId(93L);

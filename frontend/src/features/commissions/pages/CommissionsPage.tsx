@@ -34,8 +34,10 @@ export function CommissionsPage() {
     overrideEnabled: false,
     commissionUfValue: "",
     commissionPercentageValue: "",
+    useDynamicFixedCommission: true,
     globalPromotionEnabled: false,
     globalPromotionPercentage: "",
+    lowStockAlertThreshold: "2",
     ufValue: "",
   });
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -92,8 +94,10 @@ export function CommissionsPage() {
       overrideEnabled: marketSettingsQuery.data.overrideEnabled,
       commissionUfValue: String(marketSettingsQuery.data.effectiveCommissionUfValue),
       commissionPercentageValue: String(marketSettingsQuery.data.effectiveCommissionPercentageValue),
+      useDynamicFixedCommission: marketSettingsQuery.data.useDynamicFixedCommission,
       globalPromotionEnabled: marketSettingsQuery.data.globalPromotionEnabled,
       globalPromotionPercentage: String(marketSettingsQuery.data.globalPromotionPercentage ?? ""),
+      lowStockAlertThreshold: String(marketSettingsQuery.data.lowStockAlertThreshold ?? 2),
       ufValue: String(marketSettingsQuery.data.ufValue ?? ""),
     });
     setIsEditingMarketUf(false);
@@ -134,21 +138,27 @@ export function CommissionsPage() {
       commissionPercentageValue,
       globalPromotionEnabled,
       globalPromotionPercentage,
+      useDynamicFixedCommission,
+      lowStockAlertThreshold,
     }: {
       marketId: number;
       overrideEnabled: boolean;
       commissionUfValue: number;
       commissionPercentageValue: number;
+      useDynamicFixedCommission: boolean;
       globalPromotionEnabled: boolean;
       globalPromotionPercentage: number | null;
+      lowStockAlertThreshold: number;
     }) =>
       updateMarketCommissionSettings(
         marketId,
         overrideEnabled,
         commissionUfValue,
         commissionPercentageValue,
+        useDynamicFixedCommission,
         globalPromotionEnabled,
         globalPromotionPercentage,
+        lowStockAlertThreshold,
       ),
     onSuccess: async () => {
       setFeedback({ kind: "success", message: "Configuracion de la Tienda actualizada correctamente." });
@@ -216,8 +226,10 @@ export function CommissionsPage() {
       overrideEnabled: marketForm.overrideEnabled,
       commissionUfValue: Number(marketForm.commissionUfValue),
       commissionPercentageValue: Number(marketForm.commissionPercentageValue),
+      useDynamicFixedCommission: marketForm.useDynamicFixedCommission,
       globalPromotionEnabled: marketForm.globalPromotionEnabled,
       globalPromotionPercentage: marketForm.globalPromotionEnabled ? Number(marketForm.globalPromotionPercentage) : null,
+      lowStockAlertThreshold: Number(marketForm.lowStockAlertThreshold),
     });
   };
 
@@ -393,6 +405,10 @@ export function CommissionsPage() {
                 label="Modo comision fija"
                 value={marketSettingsQuery.data.useDynamicFixedCommission ? "Dinamica por Tienda" : "Distribucion general"}
               />
+              <SummaryPill
+                label="Stock bajo desde"
+                value={`${marketSettingsQuery.data.lowStockAlertThreshold} un.`}
+              />
             </div>
           ) : null}
         </Card>
@@ -404,6 +420,17 @@ export function CommissionsPage() {
               description={`Define si ${selectedMarketName} usara los valores globales o un override propio para las ventas futuras.`}
             >
               <form onSubmit={handleMarketCommissionsSubmit} className="grid gap-4">
+                <label className="flex items-center gap-3 rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={marketForm.useDynamicFixedCommission}
+                    onChange={(event) =>
+                      setMarketForm((current) => ({ ...current, useDynamicFixedCommission: event.target.checked }))
+                    }
+                  />
+                  <span>Usar comision fija dinamica por Tienda</span>
+                </label>
+
                 <label className="flex items-center gap-3 rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm">
                   <input
                     type="checkbox"
@@ -496,6 +523,37 @@ export function CommissionsPage() {
                     className="rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                   >
                     {updateMarketCommissionsMutation.isPending ? "Guardando..." : "Guardar promocion global"}
+                  </button>
+                </div>
+              </form>
+            </Card>
+
+            <Card
+              title="Alerta de stock bajo"
+              description="Define desde cuantas unidades quieres que el Espacio marque un producto como stock bajo en la vista de inventario."
+            >
+              <form onSubmit={handleMarketCommissionsSubmit} className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                <label className="grid gap-2 text-sm md:max-w-xs">
+                  <span>Umbral por Espacio</span>
+                  <select
+                    value={marketForm.lowStockAlertThreshold}
+                    onChange={(event) => setMarketForm((current) => ({ ...current, lowStockAlertThreshold: event.target.value }))}
+                    className="rounded-2xl border border-input bg-background px-3 py-2.5"
+                  >
+                    <option value="1">1 unidad</option>
+                    <option value="2">2 unidades</option>
+                    <option value="3">3 unidades</option>
+                    <option value="5">5 unidades</option>
+                  </select>
+                </label>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="submit"
+                    disabled={updateMarketCommissionsMutation.isPending}
+                    className="rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                  >
+                    {updateMarketCommissionsMutation.isPending ? "Guardando..." : "Guardar umbral"}
                   </button>
                 </div>
               </form>

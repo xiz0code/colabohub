@@ -1,6 +1,7 @@
 package com.colaborapp.closings.service;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 import java.math.BigDecimal;
@@ -21,6 +22,9 @@ class CollaboratorClosingEmailServiceTest {
 
     @Mock
     private MailService mailService;
+
+    @Mock
+    private ClosingEmailTemplateRenderer templateRenderer;
 
     @InjectMocks
     private CollaboratorClosingEmailService collaboratorClosingEmailService;
@@ -55,17 +59,25 @@ class CollaboratorClosingEmailServiceTest {
                                         new BigDecimal("5000.0000"),
                                         new BigDecimal("250.0000"),
                                         new BigDecimal("4750.0000"))));
+        when(templateRenderer.renderCollaboratorDailyHtml("Sakura Store", LocalDate.of(2026, 3, 18), summary))
+                .thenReturn("<html><body><h1>Resumen diario</h1><p>Sticker BTS</p><p>Comisiones</p><p>Neto</p></body></html>");
 
         collaboratorClosingEmailService.sendDailySummaries(
                 "Sakura Store",
                 LocalDate.of(2026, 3, 18),
                 List.of(summary));
 
+        ArgumentCaptor<String> htmlCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(mailService).send(eq("camila@example.com"), eq("Resumen diario - Sakura Store - 2026-03-18"), bodyCaptor.capture());
+        verify(mailService).sendHtml(eq("camila@example.com"), eq("Resumen diario - Sakura Store - 2026-03-18"), htmlCaptor.capture(), bodyCaptor.capture());
         org.assertj.core.api.Assertions.assertThat(bodyCaptor.getValue())
                 .contains("Detalle de productos:")
                 .contains("Sticker BTS (STK-001)")
                 .contains("Llavero TXT (LLV-002)");
+        org.assertj.core.api.Assertions.assertThat(htmlCaptor.getValue())
+                .contains("Resumen diario")
+                .contains("Sticker BTS")
+                .contains("Comisiones")
+                .contains("Neto");
     }
 }

@@ -18,6 +18,7 @@ import com.colaborapp.sales.service.PosSaleService;
 import com.colaborapp.sales.web.dto.CancelSaleRequest;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
 import com.colaborapp.sales.web.dto.PosPaymentMethodUpdateRequest;
+import com.colaborapp.sales.web.dto.PosManualSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemScanRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemUpdateRequest;
@@ -60,6 +61,11 @@ public class PosSaleController {
     @PostMapping("/{saleId}/items")
     public PosSaleResponse addItem(@PathVariable Long saleId, @Valid @RequestBody PosSaleItemRequest request) {
         return posSaleService.addItem(saleId, request);
+    }
+
+    @PostMapping("/{saleId}/manual-items")
+    public PosSaleResponse addManualItem(@PathVariable Long saleId, @Valid @RequestBody PosManualSaleItemRequest request) {
+        return posSaleService.addManualItem(saleId, request);
     }
 
     @PostMapping("/{saleId}/items/scan")

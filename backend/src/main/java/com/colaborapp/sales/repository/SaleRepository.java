@@ -27,6 +27,21 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             Instant startAt,
             Instant endAt);
 
+    @Query("""
+            select s from Sale s
+            left join fetch s.market market
+            where s.tenant.id = :tenantId
+              and s.status = :status
+              and s.confirmedAt >= :startAt
+              and s.confirmedAt < :endAt
+            order by s.confirmedAt asc, s.id asc
+            """)
+    List<Sale> findConfirmedByPeriodWithMarket(
+            @Param("tenantId") Long tenantId,
+            @Param("status") SaleStatus status,
+            @Param("startAt") Instant startAt,
+            @Param("endAt") Instant endAt);
+
     List<Sale> findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(Long tenantId, Long marketId);
 
     Optional<Sale> findFirstBySaleNumberStartingWithOrderBySaleNumberDesc(String prefix);

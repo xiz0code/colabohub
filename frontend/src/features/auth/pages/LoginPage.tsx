@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
-import { BrandMark } from "@/shared/components/branding/BrandMark";
+import { BrandLockup } from "@/shared/components/branding/BrandLockup";
 import { APP_BRANDING } from "@/shared/lib/branding";
 
 export function LoginPage() {
@@ -26,8 +26,8 @@ export function LoginPage() {
               {APP_BRANDING.eyebrow}
             </div>
 
-            <div className="flex items-center gap-4">
-              <BrandMark size="lg" />
+            <div className="space-y-5">
+              <BrandLockup size="lg" />
               <div>
                 <h1 className="text-4xl font-black tracking-tight text-slate-900 sm:text-5xl">
                   Acceso a {APP_BRANDING.name}
@@ -36,12 +36,6 @@ export function LoginPage() {
                   Inicia sesion con Google usando el correo registrado para tu Tienda o tu cuenta interna.
                 </p>
               </div>
-            </div>
-
-            <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              <FeaturePill title="Ingreso rapido" description="Una sola cuenta Google para entrar sin friccion." />
-              <FeaturePill title="Acceso seguro" description="Respetamos el rol y el alcance de cada usuario." />
-              <FeaturePill title="Logo listo" description="Esta cabecera ya queda preparada para tu logo oficial." />
             </div>
           </div>
         </div>
@@ -78,29 +72,10 @@ export function LoginPage() {
             <div className="mt-5 rounded-[24px] border border-violet-100 bg-[linear-gradient(135deg,rgba(250,244,255,0.96),rgba(255,247,251,0.96))] px-4 py-4 text-sm text-slate-600">
               Si aun no puedes entrar, solicita al administrador que confirme el correo de acceso de tu Tienda o tu usuario.
             </div>
-
-            <div className="mt-6 flex items-center gap-3 rounded-[22px] border border-dashed border-border/80 bg-background/60 px-4 py-4">
-              <BrandMark size="sm" className="shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-800">Zona lista para tu logo</p>
-                <p className="text-xs leading-5 text-muted-foreground">
-                  Cuando tengas el logo final, solo lo conectamos en la configuracion visual sin rehacer esta pantalla.
-                </p>
-              </div>
-            </div>
           </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function FeaturePill({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="rounded-[24px] border border-white/85 bg-white/70 px-4 py-4 shadow-[0_12px_24px_rgba(190,178,217,0.12)] backdrop-blur-sm">
-      <p className="text-sm font-semibold text-slate-800">{title}</p>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-    </div>
   );
 }
 

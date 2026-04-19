@@ -61,6 +61,7 @@ class UserServiceTest {
     private Market market;
     private Store store;
     private Role storeUserRole;
+    private Role sellerRole;
 
     @BeforeEach
     void setUp() {
@@ -87,6 +88,10 @@ class UserServiceTest {
         storeUserRole = new Role();
         storeUserRole.setCode(RoleCode.STORE_USER);
         storeUserRole.setName("STORE_USER");
+
+        sellerRole = new Role();
+        sellerRole.setCode(RoleCode.SELLER);
+        sellerRole.setName("SELLER");
     }
 
     @Test
@@ -153,14 +158,22 @@ class UserServiceTest {
     }
 
     @Test
-    void adminMarketCannotManageCollaboratorOutsideAllowedScope() {
+    void adminMarketAssignsStoreUserAutomaticallyInsideOwnMarket() {
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)).thenReturn(false);
         when(accessControlService.hasRole(RoleCode.ADMIN_MARKET)).thenReturn(true);
         when(accessControlService.currentMarketIds()).thenReturn(List.of(7L));
+        when(accessControlService.currentStoreIds()).thenReturn(List.of());
         when(userRepository.findByEmailIgnoreCase("otro@correo.cl")).thenReturn(Optional.empty());
         when(roleRepository.findByCode(RoleCode.STORE_USER)).thenReturn(Optional.of(storeUserRole));
+        when(marketRepository.findByIdAndTenantId(7L, 1L)).thenReturn(Optional.of(market));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            user.setId(102L);
+            return user;
+        });
 
-        assertThatThrownBy(() -> userService.createUser(new UserRequest(
+        var response = userService.createUser(new UserRequest(
                 "otro@correo.cl",
                 "Otro Colaborador",
                 null,
@@ -173,8 +186,46 @@ class UserServiceTest {
                 RoleCode.STORE_USER,
                 List.of(8L),
                 List.of(),
-                true)))
-                .isInstanceOf(AccessDeniedException.class)
-                .hasMessage("You do not have permission to perform this action.");
+                true));
+
+        assertThat(response.id()).isEqualTo(102L);
+        assertThat(response.roles()).containsExactly("STORE_USER");
+        assertThat(response.marketIds()).containsExactly(7L);
+    }
+
+    @Test
+    void adminMarketCreatesSellerAutomaticallyInsideOwnMarket() {
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)).thenReturn(false);
+        when(accessControlService.hasRole(RoleCode.ADMIN_MARKET)).thenReturn(true);
+        when(accessControlService.currentMarketIds()).thenReturn(List.of(7L));
+        when(accessControlService.currentStoreIds()).thenReturn(List.of());
+        when(userRepository.findByEmailIgnoreCase("seller@correo.cl")).thenReturn(Optional.empty());
+        when(roleRepository.findByCode(RoleCode.SELLER)).thenReturn(Optional.of(sellerRole));
+        when(marketRepository.findByIdAndTenantId(7L, 1L)).thenReturn(Optional.of(market));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User user = invocation.getArgument(0);
+            user.setId(101L);
+            return user;
+        });
+
+        var response = userService.createUser(new UserRequest(
+                "seller@correo.cl",
+                "Vendedor Uno",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false,
+                RoleCode.SELLER,
+                List.of(999L),
+                List.of(),
+                true));
+
+        assertThat(response.id()).isEqualTo(101L);
+        assertThat(response.roles()).containsExactly("SELLER");
+        assertThat(response.marketIds()).containsExactly(7L);
     }
 }

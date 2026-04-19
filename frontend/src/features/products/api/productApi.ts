@@ -3,22 +3,30 @@ import type { PageResponse } from "@/shared/lib/api/types";
 
 export type Product = {
   id: number;
-  storeId: number;
-  storeName: string;
-  ownerUserId: number | null;
-  ownerFullName: string | null;
+  storeId?: number;
+  storeName?: string;
+  ownerUserId?: number | null;
+  ownerFullName?: string | null;
+  promotionGroupId?: number | null;
+  promotionGroupName?: string | null;
   name: string;
   sku: string;
-  description: string | null;
+  description?: string | null;
   salePrice: number;
-  cost: number | null;
+  cost?: number | null;
   stock: number;
-  status: "ACTIVE" | "INACTIVE";
-  barcode: string;
-  hasPromotion: boolean;
-  promotion: ProductPromotion | null;
-  createdAt: string;
-  updatedAt: string;
+  status?: "ACTIVE" | "INACTIVE";
+  barcode?: string;
+  hasPromotion?: boolean;
+  promotion?: ProductPromotion | null;
+  createdAt?: string;
+  updatedAt?: string;
+  available?: boolean;
+  price?: number;
+};
+
+type RawProduct = Product & {
+  price?: number;
 };
 
 export type ProductPromotion =
@@ -27,12 +35,27 @@ export type ProductPromotion =
       quantity: number;
       promotionalPrice: number;
       percentageDiscount: null;
+      appliesToCash?: boolean | null;
+      appliesToDebit?: boolean | null;
+      endsAt?: string | null;
     }
   | {
       type: "PERCENTAGE_DISCOUNT";
       quantity: null;
       promotionalPrice: null;
       percentageDiscount: number;
+      appliesToCash?: boolean | null;
+      appliesToDebit?: boolean | null;
+      endsAt?: string | null;
+    }
+  | {
+      type: "PAYMENT_METHOD_DISCOUNT";
+      quantity: null;
+      promotionalPrice: null;
+      percentageDiscount: number;
+      appliesToCash: boolean;
+      appliesToDebit: boolean;
+      endsAt?: string | null;
     };
 
 export type ProductAuditLog = {
@@ -48,6 +71,7 @@ export type ListProductsParams = {
   page?: number;
   size?: number;
   storeId?: number;
+  ownerUserId?: number;
   query?: string;
   status?: "ACTIVE" | "INACTIVE";
 };
@@ -55,6 +79,8 @@ export type ListProductsParams = {
 export type CreateProductInput = {
   storeId?: number;
   ownerUserId?: number;
+  promotionGroupId?: number;
+  promotionGroupName?: string;
   name: string;
   sku: string;
   description?: string;
@@ -66,6 +92,8 @@ export type CreateProductInput = {
 
 export type UpdateProductInput = {
   ownerUserId?: number;
+  promotionGroupId?: number;
+  promotionGroupName?: string;
   name: string;
   sku: string;
   description?: string;
@@ -76,10 +104,21 @@ export type UpdateProductInput = {
 };
 
 export type ProductPromotionInput = {
-  type: "QUANTITY_BLOCK" | "PERCENTAGE_DISCOUNT";
+  type: "QUANTITY_BLOCK" | "PERCENTAGE_DISCOUNT" | "PAYMENT_METHOD_DISCOUNT";
   quantity?: number;
   promotionalPrice?: number;
   percentageDiscount?: number;
+  appliesToCash?: boolean;
+  appliesToDebit?: boolean;
+  endsAt?: string;
+};
+
+export type ProductPromotionGroup = {
+  id: number;
+  storeId: number;
+  ownerUserId: number;
+  ownerFullName: string;
+  name: string;
 };
 
 export type BarcodeLabelInput = {
@@ -110,31 +149,62 @@ export function listProducts(params: ListProductsParams = {}) {
   if (params.storeId) {
     search.set("storeId", String(params.storeId));
   }
+  if (params.ownerUserId) {
+    search.set("ownerUserId", String(params.ownerUserId));
+  }
   if (params.status) {
     search.set("status", params.status);
   }
 
-  return apiFetch<PageResponse<Product>>(`/api/products?${search.toString()}`);
+  return apiFetch<PageResponse<RawProduct>>(`/api/products?${search.toString()}`).then((page) => ({
+    ...page,
+    content: page.content.map(normalizeProduct),
+  }));
 }
 
 export function createProduct(input: CreateProductInput) {
-  return apiFetch<Product>("/api/products", {
+  return apiFetch<RawProduct>("/api/products", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }).then(normalizeProduct);
+}
+
+export function updateProduct(productId: number, input: UpdateProductInput) {
+  return apiFetch<RawProduct>(`/api/products/${productId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  }).then(normalizeProduct);
+}
+
+export function updateProductStatus(productId: number, status: Product["status"]) {
+  return apiFetch<RawProduct>(`/api/products/${productId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  }).then(normalizeProduct);
+}
+
+export function listPromotionGroups(params: { storeId?: number; ownerUserId?: number } = {}) {
+  const search = new URLSearchParams();
+  if (params.storeId) {
+    search.set("storeId", String(params.storeId));
+  }
+  if (params.ownerUserId) {
+    search.set("ownerUserId", String(params.ownerUserId));
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return apiFetch<ProductPromotionGroup[]>(`/api/products/promotion-groups${suffix}`);
+}
+
+export function createPromotionGroup(input: { storeId?: number; ownerUserId?: number; name: string }) {
+  return apiFetch<ProductPromotionGroup>("/api/products/promotion-groups", {
     method: "POST",
     body: JSON.stringify(input),
   });
 }
 
-export function updateProduct(productId: number, input: UpdateProductInput) {
-  return apiFetch<Product>(`/api/products/${productId}`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
-}
-
-export function updateProductStatus(productId: number, status: Product["status"]) {
-  return apiFetch<Product>(`/api/products/${productId}/status`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
+export function deletePromotionGroup(groupId: number) {
+  return apiFetch<void>(`/api/products/promotion-groups/${groupId}`, {
+    method: "DELETE",
   });
 }
 
@@ -157,4 +227,23 @@ export function importProductsCsv(file: File) {
     method: "POST",
     body: formData,
   });
+}
+
+export function importStockReductionsCsv(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return apiFetch<ProductImportResult>("/api/products/stock-reductions/import", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+function normalizeProduct(product: RawProduct): Product {
+  const salePrice = typeof product.salePrice === "number" ? product.salePrice : typeof product.price === "number" ? product.price : 0;
+
+  return {
+    ...product,
+    salePrice,
+  };
 }

@@ -54,7 +54,8 @@ public class SettingsController {
                 settings.effectiveCommissionUfValue(),
                 settings.effectiveCommissionPercentageValue(),
                 settings.globalPromotionEnabled(),
-                settings.globalPromotionPercentage());
+                settings.globalPromotionPercentage(),
+                settings.lowStockAlertThreshold());
     }
 
     @PutMapping("/uf/auto")
@@ -73,7 +74,8 @@ public class SettingsController {
                 settings.effectiveCommissionUfValue(),
                 settings.effectiveCommissionPercentageValue(),
                 settings.globalPromotionEnabled(),
-                settings.globalPromotionPercentage());
+                settings.globalPromotionPercentage(),
+                settings.lowStockAlertThreshold());
     }
 
     @PatchMapping("/global/uf")
@@ -117,7 +119,8 @@ public class SettingsController {
                 settings.effectiveCommissionUfValue(),
                 settings.effectiveCommissionPercentageValue(),
                 settings.globalPromotionEnabled(),
-                settings.globalPromotionPercentage());
+                settings.globalPromotionPercentage(),
+                settings.lowStockAlertThreshold());
     }
 
     @PatchMapping("/markets/{marketId}/commissions")
@@ -129,8 +132,10 @@ public class SettingsController {
                 request.overrideEnabled(),
                 request.commissionUfValue(),
                 request.commissionPercentageValue(),
+                request.useDynamicFixedCommission(),
                 request.globalPromotionEnabled(),
-                request.globalPromotionPercentage());
+                request.globalPromotionPercentage(),
+                request.lowStockAlertThreshold());
         return new MarketFinancialSettingsResponse(
                 settings.marketId(),
                 settings.marketName(),
@@ -144,6 +149,7 @@ public class SettingsController {
                 settings.effectiveCommissionUfValue(),
                 settings.effectiveCommissionPercentageValue(),
                 settings.globalPromotionEnabled(),
-                settings.globalPromotionPercentage());
+                settings.globalPromotionPercentage(),
+                settings.lowStockAlertThreshold());
     }
 }

@@ -3,6 +3,7 @@ package com.colaborapp.settings.service;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,7 @@ public class CommissionSettingsService {
 
     public static final BigDecimal DEFAULT_COMMISSION_UF = new BigDecimal("0.00169");
     public static final BigDecimal DEFAULT_COMMISSION_PERCENTAGE = new BigDecimal("0.0079");
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("America/Santiago");
 
     private final CommissionRuleRepository commissionRuleRepository;
     private final UfDailyValueRepository ufDailyValueRepository;
@@ -51,7 +53,8 @@ public class CommissionSettingsService {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         LocalDate businessDate = LocalDate.now();
         UfDailyValue ufValue = ufDailyValueRepository.findByTenantIdAndEffectiveDate(tenantId, businessDate)
-                .orElseThrow(() -> new ResourceNotFoundException("UF value is not configured for the current business date."));
+                .or(() -> ufDailyValueRepository.findTopByTenantIdOrderByEffectiveDateDescIdDesc(tenantId))
+                .orElseThrow(() -> new ResourceNotFoundException("No hay un valor UF configurado todavia. Define uno global para continuar."));
 
         return new GlobalFinancialSettings(
                 ufValue.getUfValue(),
@@ -61,12 +64,13 @@ public class CommissionSettingsService {
                 getGlobalCommissionPercentageValue(tenantId));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public MarketFinancialSettings getMarketSettings(Long marketId) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         accessControlService.requireMarketAccess(marketId);
         Market market = marketRepository.findByIdAndTenantId(marketId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("La tienda solicitada no existe o no tienes acceso a ella."));
+        refreshMarketUfIfStale(market);
         BigDecimal globalUfCommission = getGlobalCommissionUfValue(tenantId);
         BigDecimal globalPercentageCommission = getGlobalCommissionPercentageValue(tenantId);
         var override = getEffectiveCommissionConfig(marketId);
@@ -93,7 +97,8 @@ public class CommissionSettingsService {
                 override.commissionUfValue(),
                 override.commissionPercentageValue(),
                 market.isGlobalPromotionEnabled(),
-                market.getGlobalPromotionPercentage());
+                market.getGlobalPromotionPercentage(),
+                market.getLowStockAlertThreshold());
     }
 
     @Transactional
@@ -154,6 +159,17 @@ public class CommissionSettingsService {
             throw new BusinessException("La venta no tiene una Tienda asociada para calcular la UF.");
         }
 
+        if (!market.isUfManualOverride() && isUfStale(market.getUfUpdatedAt())) {
+            try {
+                return ufSyncService.syncMarketUf(market);
+            } catch (RuntimeException exception) {
+                if (isValidUfValue(market.getUfValue())) {
+                    return market.getUfValue();
+                }
+                throw new BusinessException("No pudimos sincronizar automaticamente la UF para esta Tienda. Intenta nuevamente en unos minutos o define la UF manualmente.");
+            }
+        }
+
         if (isValidUfValue(market.getUfValue())) {
             return market.getUfValue();
         }
@@ -211,8 +227,10 @@ public class CommissionSettingsService {
             boolean overrideEnabled,
             BigDecimal commissionUfValue,
             BigDecimal commissionPercentageValue,
+            boolean useDynamicFixedCommission,
             boolean globalPromotionEnabled,
-            BigDecimal globalPromotionPercentage) {
+            BigDecimal globalPromotionPercentage,
+            int lowStockAlertThreshold) {
         accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET);
         accessControlService.requireMarketAccess(marketId);
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
@@ -229,12 +247,18 @@ public class CommissionSettingsService {
             upsertCommissionRule(tenantId, market, CommissionRuleScope.MARKET, CommissionType.PERCENTAGE, commissionPercentageValue);
         }
 
+        upsertBooleanSetting(tenantId, USE_DYNAMIC_FIXED_COMMISSION_KEY, useDynamicFixedCommission);
+
         if (globalPromotionEnabled && (globalPromotionPercentage == null || globalPromotionPercentage.compareTo(BigDecimal.ZERO) <= 0)) {
             throw new BusinessException("Ingresa un porcentaje valido para activar la promocion global.");
+        }
+        if (lowStockAlertThreshold < 0) {
+            throw new BusinessException("El umbral de stock bajo no puede ser negativo.");
         }
 
         market.setGlobalPromotionEnabled(globalPromotionEnabled);
         market.setGlobalPromotionPercentage(globalPromotionEnabled ? globalPromotionPercentage : null);
+        market.setLowStockAlertThreshold(lowStockAlertThreshold);
         return getMarketSettings(marketId);
     }
 
@@ -323,7 +347,7 @@ public class CommissionSettingsService {
         return appSettingRepository.findByTenantIdAndSettingKey(tenantId, USE_DYNAMIC_FIXED_COMMISSION_KEY)
                 .map(AppSetting::getSettingValue)
                 .map(Boolean::parseBoolean)
-                .orElse(true);
+                .orElse(false);
     }
 
     private void upsertBooleanSetting(Long tenantId, String key, boolean value) {
@@ -358,6 +382,25 @@ public class CommissionSettingsService {
         return value != null && value.compareTo(BigDecimal.ZERO) > 0;
     }
 
+    private void refreshMarketUfIfStale(Market market) {
+        if (market == null || market.isUfManualOverride() || !isUfStale(market.getUfUpdatedAt())) {
+            return;
+        }
+
+        try {
+            ufSyncService.syncMarketUf(market);
+        } catch (RuntimeException exception) {
+            // Reading settings should keep working with the last known UF so the admin can set a manual value if needed.
+        }
+    }
+
+    private boolean isUfStale(Instant updatedAt) {
+        if (updatedAt == null) {
+            return true;
+        }
+        return updatedAt.atZone(BUSINESS_ZONE).toLocalDate().isBefore(LocalDate.now(BUSINESS_ZONE));
+    }
+
     public record EffectiveCommissionConfig(
             BigDecimal commissionUfValue,
             BigDecimal commissionPercentageValue) {
@@ -384,6 +427,7 @@ public class CommissionSettingsService {
             BigDecimal effectiveCommissionUfValue,
             BigDecimal effectiveCommissionPercentageValue,
             boolean globalPromotionEnabled,
-            BigDecimal globalPromotionPercentage) {
+            BigDecimal globalPromotionPercentage,
+            int lowStockAlertThreshold) {
     }
 }

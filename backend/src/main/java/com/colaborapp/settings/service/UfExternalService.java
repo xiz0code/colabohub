@@ -1,6 +1,7 @@
 package com.colaborapp.settings.service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -25,11 +26,19 @@ public class UfExternalService {
     }
 
     public UfValueResult fetchLatestUfValueWithSource() {
+        return fetchUfValueWithSource(null);
+    }
+
+    public BigDecimal fetchUfValue(LocalDate date) {
+        return fetchUfValueWithSource(date).value();
+    }
+
+    public UfValueResult fetchUfValueWithSource(LocalDate date) {
         RuntimeException lastFailure = null;
         for (int index = 0; index < providers.size(); index++) {
             UfProvider provider = providers.get(index);
             try {
-                var value = provider.fetchLatestUfValue();
+                var value = date == null ? provider.fetchLatestUfValue() : provider.fetchUfValue(date);
                 if (value.isPresent() && value.get().compareTo(BigDecimal.ZERO) > 0) {
                     boolean fallbackUsed = index > 0;
                     if (fallbackUsed) {
@@ -39,10 +48,14 @@ public class UfExternalService {
                     }
                     return new UfValueResult(value.get(), provider.providerName(), fallbackUsed);
                 }
-                log.warn("UF provider returned no usable value: {}", provider.providerName());
+                log.warn("UF provider returned no usable value: {} for date {}", provider.providerName(), date);
             } catch (RuntimeException exception) {
                 lastFailure = exception;
-                log.warn("UF provider failed: {}", provider.providerName(), exception);
+                log.warn(
+                        "UF provider failed: {} for date {} - {}",
+                        provider.providerName(),
+                        date,
+                        exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage());
             }
         }
 

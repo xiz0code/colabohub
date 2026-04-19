@@ -44,14 +44,17 @@ public class BarcodeLabelPdfService {
 
         double pageWidth = 595d;
         double pageHeight = 842d;
-        double leftMargin = 24d;
-        double topMargin = 28d;
-        double labelWidth = 175d;
-        double labelHeight = 92d;
-        double gapX = 12d;
-        double gapY = 10d;
-        int columns = 3;
-        int rows = 8;
+        double leftMargin = 28.35d;
+        double rightMargin = 28.35d;
+        double topMargin = 42.5d;
+        double bottomMargin = 42.5d;
+        double labelWidth = 124.0d;
+        double labelHeight = 56.0d;
+        int columns = 4;
+        double gapY = 8d;
+        int rows = (int) Math.floor((pageHeight - topMargin - bottomMargin + gapY) / (labelHeight + gapY));
+        double availableWidth = pageWidth - leftMargin - rightMargin - (columns * labelWidth);
+        double gapX = availableWidth / Math.max(columns - 1, 1);
 
         for (int index = 0; index < labels.size(); index++) {
             if (index > 0 && index % (columns * rows) == 0) {
@@ -74,15 +77,16 @@ public class BarcodeLabelPdfService {
 
     private void drawLabel(PdfBuilder pdf, ProductResponse product, boolean includeCollaboratorName, double x, double yTop, double width, double height) {
         double bottom = yTop - height;
-        pdf.roundedRect(x, bottom, width, height, 14d, "1 1 1", "0.82 0.78 0.9");
-        pdf.text(x + 12d, yTop - 18d, 10d, truncate(product.name(), 28), true);
-        pdf.text(x + 12d, yTop - 32d, 8.5d, "SKU " + product.sku(), false);
+        double inset = 6d;
+        pdf.roundedRect(x, bottom, width, height, 10d, "1 1 1", "0.82 0.78 0.9");
+        pdf.text(x + inset, yTop - 10.5d, 6.6d, truncate(product.name(), 24), true);
+        pdf.text(x + inset, yTop - 19d, 5.8d, formatPrice(product.salePrice()), true);
         if (includeCollaboratorName && product.ownerFullName() != null && !product.ownerFullName().isBlank()) {
-            pdf.text(x + 12d, yTop - 45d, 8.5d, product.ownerFullName(), false);
+            pdf.text(x + inset, yTop - 27.5d, 5.1d, truncate(product.ownerFullName(), 20), false);
         }
 
-        drawCode128(pdf, product.barcode(), x + 12d, bottom + 18d, width - 24d, 28d);
-        pdf.text(x + 12d, bottom + 8d, 8d, product.barcode(), false);
+        drawCode128(pdf, product.barcode(), x + inset, bottom + 12d, width - (inset * 2), 13d);
+        pdf.text(x + inset, bottom + 4.4d, 5.0d, product.barcode(), false);
     }
 
     private void drawCode128(PdfBuilder pdf, String barcode, double x, double y, double maxWidth, double height) {
@@ -112,8 +116,9 @@ public class BarcodeLabelPdfService {
         }
 
         int totalModules = modules.stream().mapToInt(Integer::intValue).sum();
-        double moduleWidth = Math.max(0.6d, Math.min(1.35d, maxWidth / totalModules));
-        double cursor = x;
+        double moduleWidth = Math.min(0.92d, maxWidth / totalModules);
+        double renderedWidth = totalModules * moduleWidth;
+        double cursor = x + Math.max((maxWidth - renderedWidth) / 2d, 0d);
         boolean bar = true;
         for (Integer module : modules) {
             double sectionWidth = module * moduleWidth;
@@ -130,6 +135,13 @@ public class BarcodeLabelPdfService {
             return value;
         }
         return value.substring(0, maxLength - 1) + "...";
+    }
+
+    private String formatPrice(java.math.BigDecimal salePrice) {
+        if (salePrice == null) {
+            return "$0";
+        }
+        return "$" + salePrice.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString().replaceAll("\\B(?=(\\d{3})+(?!\\d))", ".");
     }
 
     private static final class PdfBuilder {

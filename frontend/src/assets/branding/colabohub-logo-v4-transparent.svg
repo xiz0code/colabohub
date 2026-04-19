@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="purpleGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#B78CFF"/>
+      <stop offset="100%" stop-color="#8D5AE8"/>
+    </linearGradient>
+    <linearGradient id="tealGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#B8FFF5"/>
+      <stop offset="100%" stop-color="#72DCD0"/>
+    </linearGradient>
+    <linearGradient id="textGrad" x1="280" y1="0" x2="1320" y2="0">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="62%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#B8FFF5"/>
+    </linearGradient>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0.63
+                0 1 0 0 0.47
+                0 0 1 0 1
+                0 0 0 0.55 0"/>
+    </filter>
+    <filter id="tealGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9" result="blur2"/>
+      <feColorMatrix in="blur2" type="matrix"
+        values="1 0 0 0 0.45
+                0 1 0 0 0.94
+                0 0 1 0 0.90
+                0 0 0 0.55 0"/>
+    </filter>
+    <filter id="textGlow" x="-20%" y="-40%" width="140%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="blur3"/>
+      <feColorMatrix in="blur3" type="matrix"
+        values="1 0 0 0 0.65
+                0 1 0 0 0.85
+                0 0 1 0 1
+                0 0 0 0.48 0"/>
+    </filter>
+    <style>
+      .wordmark {
+        font-family: Inter, Poppins, Montserrat, Arial, sans-serif;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+    </style>
+  </defs>
+
+  <!-- Icon glow -->
+  <g opacity="0.92">
+    <rect x="510" y="128" width="580" height="320" rx="32" fill="url(#purpleGrad)" filter="url(#softGlow)" opacity="0.18"/>
+    <ellipse cx="800" cy="470" rx="255" ry="16" fill="#7BE8DE" filter="url(#tealGlow)" opacity="0.55"/>
+  </g>
+
+  <!-- Sparkles -->
+  <g opacity="0.95">
+    <g transform="translate(505 140)">
+      <path d="M16 0L20 12L32 16L20 20L16 32L12 20L0 16L12 12L16 0Z" fill="#EFE6FF"/>
+    </g>
+    <g transform="translate(1100 128) scale(0.8)">
+      <path d="M16 0L20 12L32 16L20 20L16 32L12 20L0 16L12 12L16 0Z" fill="#EFE6FF"/>
+    </g>
+    <g transform="translate(1140 198) scale(0.55)">
+      <path d="M16 0L20 12L32 16L20 20L16 32L12 20L0 16L12 12L16 0Z" fill="#EFE6FF"/>
+    </g>
+    <g transform="translate(468 214) scale(0.5)">
+      <path d="M16 0L20 12L32 16L20 20L16 32L12 20L0 16L12 12L16 0Z" fill="#EFE6FF"/>
+    </g>
+  </g>
+
+  <!-- Storefront icon -->
+  <g transform="translate(0 5)">
+    <!-- Roof -->
+    <path d="M638 180C644 162 660 150 678 150H922C940 150 956 162 962 180L975 220C980 238 966 256 947 256H653C634 256 620 238 625 220L638 180Z" fill="url(#purpleGrad)"/>
+    <path d="M665 182H935L927 211C924 222 914 230 902 230H698C686 230 676 222 673 211L665 182Z" fill="#F6ECFF"/>
+    <!-- Awning separators -->
+    <path d="M735 182L727 229" stroke="#C7A7FF" stroke-width="10" stroke-linecap="round"/>
+    <path d="M800 182V229" stroke="#C7A7FF" stroke-width="10" stroke-linecap="round"/>
+    <path d="M865 182L873 229" stroke="#C7A7FF" stroke-width="10" stroke-linecap="round"/>
+
+    <!-- Left shop -->
+    <rect x="588" y="286" width="170" height="98" rx="28" fill="url(#purpleGrad)"/>
+    <rect x="612" y="316" width="122" height="48" rx="10" fill="#F6ECFF"/>
+    <line x1="652" y1="316" x2="652" y2="364" stroke="#CBB2FF" stroke-width="8"/>
+    <line x1="694" y1="316" x2="694" y2="364" stroke="#CBB2FF" stroke-width="8"/>
+    <circle cx="632" cy="305" r="11" fill="#ECDDFF"/>
+    <circle cx="673" cy="305" r="11" fill="#ECDDFF"/>
+    <circle cx="714" cy="305" r="11" fill="#ECDDFF"/>
+
+    <!-- Center shop -->
+    <rect x="718" y="266" width="164" height="124" rx="34" fill="url(#tealGrad)"/>
+    <circle cx="751" cy="295" r="10" fill="#ECFFFC"/>
+    <circle cx="800" cy="295" r="10" fill="#ECFFFC"/>
+    <circle cx="849" cy="295" r="10" fill="#ECFFFC"/>
+    <rect x="765" y="320" width="70" height="60" rx="10" fill="#F8FFFE"/>
+    <line x1="800" y1="320" x2="800" y2="380" stroke="#9BEAE2" stroke-width="8"/>
+
+    <!-- Right shop -->
+    <rect x="842" y="286" width="170" height="98" rx="28" fill="url(#purpleGrad)"/>
+    <rect x="866" y="316" width="122" height="48" rx="10" fill="#F6ECFF"/>
+    <line x1="906" y1="316" x2="906" y2="364" stroke="#CBB2FF" stroke-width="8"/>
+    <line x1="948" y1="316" x2="948" y2="364" stroke="#CBB2FF" stroke-width="8"/>
+    <circle cx="886" cy="305" r="11" fill="#ECDDFF"/>
+    <circle cx="927" cy="305" r="11" fill="#ECDDFF"/>
+    <circle cx="968" cy="305" r="11" fill="#ECDDFF"/>
+
+    <!-- Base line -->
+    <rect x="560" y="392" width="480" height="12" rx="6" fill="url(#purpleGrad)"/>
+  </g>
+
+  <!-- Text glow -->
+  <text x="800" y="700" text-anchor="middle" class="wordmark" font-size="150" fill="url(#textGrad)" filter="url(#textGlow)">ColaboHub</text>
+  <text x="800" y="700" text-anchor="middle" class="wordmark" font-size="150" fill="url(#textGrad)">ColaboHub</text>
+</svg>

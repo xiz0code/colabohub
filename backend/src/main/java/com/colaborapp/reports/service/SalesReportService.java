@@ -235,8 +235,15 @@ public class SalesReportService {
                     item.getSale().getId(),
                     item.getSale().getSaleNumber(),
                     item.getSale().getConfirmedAt(),
+                    item.getSale().getPaymentMethod() != null ? item.getSale().getPaymentMethod().name() : null,
                     item.getProductNameSnapshot(),
+                    describePromotionLabel(item),
                     item.getQuantity(),
+                    item.getBaseUnitPrice(),
+                    item.getSale().getUfValue(),
+                    item.getCommission1Amount(),
+                    item.getCommission2Amount(),
+                    item.getCommissionIvaAmount(),
                     item.getSubtotal(),
                     item.getTotalCommissionAmount(),
                     item.getNetAmount()));
@@ -321,6 +328,10 @@ public class SalesReportService {
 
     private ScopedSalesSnapshot buildScopedSalesSnapshot() {
         DailyRange range = currentBusinessRange();
+        if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+            return buildStoreUserSnapshot(range, accessControlService.getCurrentUser().user().getId());
+        }
+
         List<SaleStoreSummary> visibleSummaries = filterVisibleSummaries(
                 saleStoreSummaryRepository.findByPeriodWithSaleAndStore(
                         range.tenantId(),
@@ -345,9 +356,9 @@ public class SalesReportService {
                     summary.getSale().getConfirmedAt()))
                     .add(summary);
 
-            stores.computeIfAbsent(summary.getStore().getId(), ignored -> new StoreAggregate(
-                    summary.getStore().getId(),
-                    summary.getStore().getName()))
+            stores.computeIfAbsent(summary.getStore().getMarket().getId(), ignored -> new StoreAggregate(
+                    summary.getStore().getMarket().getId(),
+                    summary.getStore().getMarket().getName()))
                     .add(summary);
         }
 
@@ -364,6 +375,47 @@ public class SalesReportService {
                 totalCommission,
                 totalNet,
                 stores.values().stream().map(StoreAggregate::toResponse).toList(),
+                sales.values().stream().map(SaleAggregate::toResponse).toList());
+    }
+
+    private ScopedSalesSnapshot buildStoreUserSnapshot(DailyRange range, Long collaboratorUserId) {
+        List<SaleItem> items = saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                range.tenantId(),
+                collaboratorUserId,
+                SaleStatus.CONFIRMED,
+                range.startAt(),
+                range.endAt());
+
+        Map<Long, SaleAggregate> sales = new LinkedHashMap<>();
+        Map<Long, StoreAggregate> spaces = new LinkedHashMap<>();
+        BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
+        BigDecimal totalCommission = BigDecimal.ZERO.setScale(4);
+        BigDecimal totalNet = BigDecimal.ZERO.setScale(4);
+
+        for (SaleItem item : items) {
+            totalAmount = totalAmount.add(item.getSubtotal());
+            totalCommission = totalCommission.add(item.getTotalCommissionAmount());
+            totalNet = totalNet.add(item.getNetAmount());
+
+            sales.computeIfAbsent(item.getSale().getId(), ignored -> new SaleAggregate(
+                    item.getSale().getId(),
+                    item.getSale().getSaleNumber(),
+                    item.getSale().getConfirmedAt()))
+                    .addItem(item);
+
+            Long marketId = item.getStore().getMarket().getId();
+            String marketName = item.getStore().getMarket().getName();
+            spaces.computeIfAbsent(marketId, ignored -> new StoreAggregate(marketId, marketName))
+                    .addItem(item);
+        }
+
+        return new ScopedSalesSnapshot(
+                range.businessDate(),
+                sales.size(),
+                totalAmount,
+                totalCommission,
+                totalNet,
+                spaces.values().stream().map(StoreAggregate::toResponse).toList(),
                 sales.values().stream().map(SaleAggregate::toResponse).toList());
     }
 
@@ -392,11 +444,11 @@ public class SalesReportService {
         }
 
         if (accessControlService.hasRole(RoleCode.STORE_USER)) {
-            List<Long> storeIds = accessControlService.currentStoreIds();
-            if (storeIds.isEmpty()) {
+            Long ownerUserId = accessControlService.getCurrentUser().user().getId();
+            if (ownerUserId == null) {
                 return 0L;
             }
-            return productRepository.countByTenantIdAndStore_IdInAndStatus(tenantId, storeIds, ProductStatus.ACTIVE);
+            return productRepository.countByTenantIdAndOwnerUser_IdAndStatus(tenantId, ownerUserId, ProductStatus.ACTIVE);
         }
 
         List<Long> marketIds = accessControlService.currentMarketIds();
@@ -413,7 +465,7 @@ public class SalesReportService {
         if (accessControlService.hasRole(RoleCode.STORE_USER)) {
             Long currentUserId = accessControlService.getCurrentUser().user().getId();
             if (!currentUserId.equals(collaboratorUserId)) {
-                throw new org.springframework.security.access.AccessDeniedException("You do not have permission to perform this action.");
+                throw new org.springframework.security.access.AccessDeniedException("No tienes permiso para realizar esta accion.");
             }
             return;
         }
@@ -421,8 +473,18 @@ public class SalesReportService {
         Set<Long> allowedMarketIds = Set.copyOf(accessControlService.currentMarketIds());
         boolean allowed = collaboratorMarketIds.stream().anyMatch(allowedMarketIds::contains);
         if (!allowed) {
-            throw new org.springframework.security.access.AccessDeniedException("You do not have permission to perform this action.");
+            throw new org.springframework.security.access.AccessDeniedException("No tienes permiso para realizar esta accion.");
         }
+    }
+
+    private String describePromotionLabel(SaleItem item) {
+        if (item.getAppliedPromotionName() != null && !item.getAppliedPromotionName().isBlank()) {
+            return item.getAppliedPromotionName();
+        }
+        return switch (item.getPricingType()) {
+            case PROMOTION -> "Promocion aplicada";
+            case NORMAL -> "Sin promocion";
+        };
     }
 
     private long countLowStockProducts(Long tenantId) {
@@ -431,13 +493,13 @@ public class SalesReportService {
         }
 
         if (accessControlService.hasRole(RoleCode.STORE_USER)) {
-            List<Long> storeIds = accessControlService.currentStoreIds();
-            if (storeIds.isEmpty()) {
+            Long ownerUserId = accessControlService.getCurrentUser().user().getId();
+            if (ownerUserId == null) {
                 return 0L;
             }
-            return productRepository.countByTenantIdAndStore_IdInAndStatusAndStockLessThanEqual(
+            return productRepository.countByTenantIdAndOwnerUser_IdAndStatusAndStockLessThanEqual(
                     tenantId,
-                    storeIds,
+                    ownerUserId,
                     ProductStatus.ACTIVE,
                     LOW_STOCK_THRESHOLD);
         }
@@ -478,8 +540,8 @@ public class SalesReportService {
             totalCommission = totalCommission.add(summary.getTotalCommissionAmount());
             totalNet = totalNet.add(summary.getNetAmount());
             stores.add(new SaleDetailStoreSummaryResponse(
-                    summary.getStore().getId(),
-                    summary.getStore().getName(),
+                    summary.getStore().getMarket().getId(),
+                    summary.getStore().getMarket().getName(),
                     summary.getLineCount(),
                     summary.getUnitCount(),
                     summary.getSubtotalAmount(),
@@ -487,15 +549,30 @@ public class SalesReportService {
                     summary.getNetAmount()));
         }
 
+        private void addItem(SaleItem item) {
+            totalAmount = totalAmount.add(item.getSubtotal());
+            totalCommission = totalCommission.add(item.getTotalCommissionAmount());
+            totalNet = totalNet.add(item.getNetAmount());
+            items.add(new SaleTodayItemResponse(
+                    item.getId(),
+                    item.getProductNameSnapshot(),
+                    item.getCollaboratorNameSnapshot(),
+                    item.getStore().getMarket().getName(),
+                    item.getQuantity(),
+                    item.getSubtotal(),
+                    item.getTotalCommissionAmount(),
+                    item.getNetAmount()));
+        }
+
         private void attachItems(List<SaleItem> saleItems) {
             for (SaleItem item : saleItems) {
                 items.add(new SaleTodayItemResponse(
-                        item.getId(),
-                        item.getProductNameSnapshot(),
-                        item.getCollaboratorNameSnapshot(),
-                        item.getStore().getName(),
-                        item.getQuantity(),
-                        item.getSubtotal(),
+                    item.getId(),
+                    item.getProductNameSnapshot(),
+                    item.getCollaboratorNameSnapshot(),
+                    item.getStore().getMarket().getName(),
+                    item.getQuantity(),
+                    item.getSubtotal(),
                         item.getTotalCommissionAmount(),
                         item.getNetAmount()));
             }
@@ -532,6 +609,13 @@ public class SalesReportService {
             subtotalAmount = subtotalAmount.add(summary.getSubtotalAmount());
             totalCommissionAmount = totalCommissionAmount.add(summary.getTotalCommissionAmount());
             netAmount = netAmount.add(summary.getNetAmount());
+        }
+
+        private void addItem(SaleItem item) {
+            saleIds.add(item.getSale().getId());
+            subtotalAmount = subtotalAmount.add(item.getSubtotal());
+            totalCommissionAmount = totalCommissionAmount.add(item.getTotalCommissionAmount());
+            netAmount = netAmount.add(item.getNetAmount());
         }
 
         private StoreSalesSummaryResponse toResponse() {

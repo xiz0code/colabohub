@@ -95,6 +95,7 @@ class CommissionSettingsServiceTest {
         assertThat(response.ufValue()).isEqualByComparingTo("36500.00");
         assertThat(response.ufUpdatedAt()).isNotNull();
         assertThat(response.ufManualOverride()).isTrue();
+        assertThat(response.useDynamicFixedCommission()).isFalse();
         assertThat(market.getUfValue()).isEqualByComparingTo("36500.00");
         assertThat(market.isUfManualOverride()).isTrue();
     }
@@ -156,6 +157,8 @@ class CommissionSettingsServiceTest {
         fixedRule.setCommissionValue(new BigDecimal("0.004"));
         CommissionRule percentageRule = new CommissionRule();
         percentageRule.setCommissionValue(new BigDecimal("0.020"));
+        AppSetting dynamicFixedCommission = new AppSetting();
+        dynamicFixedCommission.setSettingValue("false");
 
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(marketRepository.findByIdAndTenantId(10L, 1L)).thenReturn(Optional.of(market));
@@ -169,20 +172,26 @@ class CommissionSettingsServiceTest {
                 .thenReturn(Optional.empty());
         when(commissionRuleRepository.findByTenantIdAndScopeAndTypeAndMarketIsNullAndStoreIsNull(1L, CommissionRuleScope.GLOBAL, CommissionType.PERCENTAGE))
                 .thenReturn(Optional.empty());
-        when(appSettingRepository.findByTenantIdAndSettingKey(1L, "useDynamicFixedCommission")).thenReturn(Optional.empty());
+        when(appSettingRepository.findByTenantIdAndSettingKey(1L, "useDynamicFixedCommission")).thenReturn(Optional.of(dynamicFixedCommission));
 
         var response = commissionSettingsService.updateMarketSettings(
                 10L,
                 true,
                 new BigDecimal("0.004"),
                 new BigDecimal("0.020"),
+                false,
                 true,
-                new BigDecimal("25.00"));
+                new BigDecimal("25.00"),
+                5);
 
         assertThat(response.globalPromotionEnabled()).isTrue();
         assertThat(response.globalPromotionPercentage()).isEqualByComparingTo("25.00");
+        assertThat(response.useDynamicFixedCommission()).isFalse();
+        assertThat(response.lowStockAlertThreshold()).isEqualTo(5);
         assertThat(market.isGlobalPromotionEnabled()).isTrue();
         assertThat(market.getGlobalPromotionPercentage()).isEqualByComparingTo("25.00");
+        assertThat(market.getLowStockAlertThreshold()).isEqualTo(5);
+        verify(appSettingRepository).save(org.mockito.ArgumentMatchers.any(AppSetting.class));
     }
 
     @Test
@@ -196,7 +205,9 @@ class CommissionSettingsServiceTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 true,
-                BigDecimal.ZERO))
+                true,
+                BigDecimal.ZERO,
+                2))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("Ingresa un porcentaje valido para activar la promocion global.");
 
@@ -224,5 +235,27 @@ class CommissionSettingsServiceTest {
 
         assertThat(response.useDynamicFixedCommission()).isFalse();
         verify(appSettingRepository).save(org.mockito.ArgumentMatchers.any(AppSetting.class));
+    }
+
+    @Test
+    void shouldFallbackToLatestTenantUfWhenCurrentBusinessDateIsMissing() {
+        var latestUf = new com.colaborapp.sales.domain.UfDailyValue();
+        latestUf.setUfValue(new BigDecimal("39841.72"));
+        latestUf.setEffectiveDate(java.time.LocalDate.now().minusDays(1));
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(ufDailyValueRepository.findByTenantIdAndEffectiveDate(1L, java.time.LocalDate.now())).thenReturn(Optional.empty());
+        when(ufDailyValueRepository.findTopByTenantIdOrderByEffectiveDateDescIdDesc(1L)).thenReturn(Optional.of(latestUf));
+        when(commissionRuleRepository.findByTenantIdAndScopeAndTypeAndMarketIsNullAndStoreIsNull(1L, CommissionRuleScope.GLOBAL, CommissionType.FIXED))
+                .thenReturn(Optional.empty());
+        when(commissionRuleRepository.findByTenantIdAndScopeAndTypeAndMarketIsNullAndStoreIsNull(1L, CommissionRuleScope.GLOBAL, CommissionType.PERCENTAGE))
+                .thenReturn(Optional.empty());
+        when(appSettingRepository.findByTenantIdAndSettingKey(1L, "useDynamicFixedCommission")).thenReturn(Optional.empty());
+
+        var response = commissionSettingsService.getGlobalSettings();
+
+        assertThat(response.currentUfValue()).isEqualByComparingTo("39841.72");
+        assertThat(response.ufLastUpdatedAt()).isEqualTo(latestUf.getEffectiveDate());
+        assertThat(response.useDynamicFixedCommission()).isFalse();
     }
 }

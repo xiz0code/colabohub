@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
@@ -23,6 +24,8 @@ import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.colaborapp.common.exception.BusinessException;
+import com.colaborapp.products.domain.ProductStatus;
+import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.products.web.dto.ProductCreateRequest;
 import com.colaborapp.promotions.domain.PromotionType;
 import com.colaborapp.users.domain.Role;
@@ -35,6 +38,9 @@ class ProductImportServiceTest {
 
     @Mock
     private ProductService productService;
+
+    @Mock
+    private ProductRepository productRepository;
 
     @Mock
     private UserRepository userRepository;
@@ -99,6 +105,107 @@ class ProductImportServiceTest {
     }
 
     @Test
+    void shouldImportWindows1252CsvWithoutBreakingSpanishCharacters() {
+        when(userRepository.findWithAccessByEmailIgnoreCase("camila@example.com")).thenReturn(Optional.of(collaborator));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "productos.csv",
+                "text/csv",
+                ("""
+                        nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor
+                        Porta credencial diseños varios,2000,6,Diseño con ñ y acento á,camila@example.com,,
+                        """
+                ).getBytes(Charset.forName("windows-1252")));
+
+        var response = productImportService.importCsv(file);
+
+        ArgumentCaptor<ProductCreateRequest> requestCaptor = ArgumentCaptor.forClass(ProductCreateRequest.class);
+        verify(productService).createProduct(requestCaptor.capture());
+
+        assertThat(response.successCount()).isEqualTo(1);
+        assertThat(response.errorCount()).isZero();
+        assertThat(requestCaptor.getValue().name()).isEqualTo("Porta credencial diseños varios");
+        assertThat(requestCaptor.getValue().description()).isEqualTo("Diseño con ñ y acento á");
+    }
+
+    @Test
+    void shouldImportPromotionGroupFromCsvTemplate() {
+        when(userRepository.findWithAccessByEmailIgnoreCase("camila@example.com")).thenReturn(Optional.of(collaborator));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "productos.csv",
+                "text/csv",
+                ("""
+                        nombre,precio,stock,descripcion,colaborador_email,grupo_promocional,promocion_tipo,promocion_valor,promocion_fin
+                        Photocard Grupo A,1000,20,Version A,camila@example.com,Photocards,CANTIDAD,2x1500,
+                        """
+                ).getBytes(StandardCharsets.UTF_8));
+
+        var response = productImportService.importCsv(file);
+
+        ArgumentCaptor<ProductCreateRequest> requestCaptor = ArgumentCaptor.forClass(ProductCreateRequest.class);
+        verify(productService).createProduct(requestCaptor.capture());
+
+        assertThat(response.successCount()).isEqualTo(1);
+        assertThat(response.errorCount()).isZero();
+        assertThat(requestCaptor.getValue().promotionGroupName()).isEqualTo("Photocards");
+        assertThat(requestCaptor.getValue().promotion().type()).isEqualTo(PromotionType.QUANTITY_BLOCK);
+    }
+
+    @Test
+    void shouldImportSemicolonSeparatedCsvExportedByExcel() {
+        when(userRepository.findWithAccessByEmailIgnoreCase("camila@example.com")).thenReturn(Optional.of(collaborator));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "productos.csv",
+                "text/csv",
+                ("""
+                        nombre;precio;stock;descripcion;colaborador_email;grupo_promocional;promocion_tipo;promocion_valor;promocion_fin
+                        Tazon;4000;14;Tazon Mango Normal;camila@example.com;;;;
+                        """
+                ).getBytes(StandardCharsets.UTF_8));
+
+        var response = productImportService.importCsv(file);
+
+        ArgumentCaptor<ProductCreateRequest> requestCaptor = ArgumentCaptor.forClass(ProductCreateRequest.class);
+        verify(productService).createProduct(requestCaptor.capture());
+
+        assertThat(response.successCount()).isEqualTo(1);
+        assertThat(response.errorCount()).isZero();
+        assertThat(requestCaptor.getValue().name()).isEqualTo("Tazon");
+        assertThat(requestCaptor.getValue().salePrice()).isEqualByComparingTo("4000.00");
+    }
+
+    @Test
+    void shouldSkipExistingProductByNameAndCollaboratorDuringMassImport() {
+        when(userRepository.findWithAccessByEmailIgnoreCase("camila@example.com")).thenReturn(Optional.of(collaborator));
+        when(productRepository.existsByOwnerUserIdAndNameIgnoreCaseAndStatus(15L, "Tazon", ProductStatus.ACTIVE)).thenReturn(true);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "productos.csv",
+                "text/csv",
+                ("""
+                        nombre;precio;stock;descripcion;colaborador_email;grupo_promocional;promocion_tipo;promocion_valor;promocion_fin
+                        Tazon;4000;14;Tazon Mango Normal;camila@example.com;;;;
+                        """
+                ).getBytes(StandardCharsets.UTF_8));
+
+        var response = productImportService.importCsv(file);
+
+        verify(productService, org.mockito.Mockito.never()).createProduct(any());
+        assertThat(response.successCount()).isZero();
+        assertThat(response.errorCount()).isEqualTo(1);
+        assertThat(response.errors()).singleElement().satisfies(error -> {
+            assertThat(error.rowNumber()).isEqualTo(2);
+            assertThat(error.message()).isEqualTo("Producto ya existe para esta Tienda. No se duplico.");
+        });
+    }
+
+    @Test
     void shouldRejectInvalidHeader() {
         MockMultipartFile file = new MockMultipartFile(
                 "file",
@@ -108,7 +215,7 @@ class ProductImportServiceTest {
 
         assertThatThrownBy(() -> productImportService.importCsv(file))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("La plantilla no coincide. Usa las columnas nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor.");
+                .hasMessage("La plantilla no coincide. Usa las columnas nombre,precio,stock,descripcion,colaborador_email,grupo_promocional,promocion_tipo,promocion_valor,promocion_fin.");
     }
 
     @Test

@@ -14,6 +14,18 @@ public interface ProductPromotionRepository extends JpaRepository<ProductPromoti
 
     Optional<ProductPromotion> findFirstByProductIdOrderByIdAsc(Long productId);
 
+    @Query("""
+            select pp from ProductPromotion pp
+            where pp.product.id = :productId
+              and pp.active = true
+              and (pp.startsAt is null or pp.startsAt <= :referenceTime)
+              and (pp.endsAt is null or pp.endsAt >= :referenceTime)
+            order by pp.id asc
+            """)
+    Optional<ProductPromotion> findFirstActiveByProductId(
+            @Param("productId") Long productId,
+            @Param("referenceTime") Instant referenceTime);
+
     void deleteByProductId(Long productId);
 
     @Query("""

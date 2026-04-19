@@ -54,7 +54,8 @@ export type SaleTodayItem = {
   collaboratorName: string | null;
   storeName: string;
   quantity: number;
-  subtotalAmount: number;
+  subtotalAmount?: number;
+  subtotal?: number;
   totalCommissionAmount: number;
   netAmount: number;
 };
@@ -74,8 +75,15 @@ export type CollaboratorSaleEntry = {
   saleId: number;
   saleNumber: string;
   confirmedAt: string;
+  paymentMethod: string | null;
   productName: string;
+  promotionLabel: string;
   quantity: number;
+  unitPrice: number;
+  ufValue: number | null;
+  fixedCommissionAmount: number;
+  variableCommissionAmount: number;
+  commissionIvaAmount: number;
   totalAmount: number;
   commissionAmount: number;
   netAmount: number;
@@ -91,6 +99,14 @@ export type CollaboratorSalesReport = {
   totalNetAmount: number;
   totalIvaAmount: number;
   entries: CollaboratorSaleEntry[];
+};
+
+export type CommissionRecalculationResult = {
+  dateFrom: string;
+  dateTo: string;
+  reviewedSales: number;
+  recalculatedSales: number;
+  ufDatesUsed: number;
 };
 
 export function getDashboardSummary() {
@@ -116,4 +132,11 @@ export function getCollaboratorSalesReport(collaboratorUserId: number, dateFrom?
 
   const suffix = search.size > 0 ? `?${search.toString()}` : "";
   return apiFetch<CollaboratorSalesReport>(`/api/reports/sales/collaborator/${collaboratorUserId}${suffix}`);
+}
+
+export function recalculateSalesCommissions(dateFrom: string, dateTo: string) {
+  return apiFetch<CommissionRecalculationResult>("/api/reports/sales/commissions/recalculate", {
+    method: "POST",
+    body: JSON.stringify({ dateFrom, dateTo }),
+  });
 }

@@ -16,6 +16,7 @@ public class DailyClosingEmailService {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE;
 
     private final MailService mailService;
+    private final ClosingEmailTemplateRenderer templateRenderer;
 
     public void sendClosingSummary(String marketEmail, DailyClosingResponse response) {
         String subject = "Daily Closing - " + response.marketName() + " - " + DATE_FORMATTER.format(response.closingDate());
@@ -44,6 +45,7 @@ public class DailyClosingEmailService {
                 .append(store.totalItems())
                 .append(System.lineSeparator()));
 
-        mailService.send(marketEmail, subject, body.toString());
+        String html = templateRenderer.renderDailyAdminHtml(response);
+        mailService.sendHtml(marketEmail, subject, html, body.toString());
     }
 }

@@ -7,6 +7,8 @@ import com.colaborapp.sales.domain.SaleItemPricingType;
 public record PosSaleItemResponse(
         Long id,
         Long productId,
+        boolean manualEntry,
+        String manualReference,
         Long storeId,
         String storeName,
         String productName,
@@ -14,6 +16,7 @@ public record PosSaleItemResponse(
         String sku,
         String barcode,
         Integer quantity,
+        Integer availableStock,
         BigDecimal baseUnitPrice,
         BigDecimal lineBaseSubtotal,
         BigDecimal promotionDiscountAmount,

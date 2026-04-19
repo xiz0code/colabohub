@@ -26,6 +26,7 @@ import com.colaborapp.closings.service.DailyClosingService;
 import com.colaborapp.closings.web.DailyClosingController;
 import com.colaborapp.closings.web.dto.DailyClosingResponse;
 import com.colaborapp.closings.web.dto.DailyClosingStoreResponse;
+import com.colaborapp.common.web.HealthController;
 import com.colaborapp.common.exception.GlobalExceptionHandler;
 import com.colaborapp.config.SecurityConfig;
 import com.colaborapp.reports.service.SalesReportService;
@@ -44,7 +45,7 @@ import com.colaborapp.sales.web.dto.PosSaleStoreSummaryResponse;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.security.GoogleOAuth2UserService;
 
-@WebMvcTest({ PosSaleController.class, DailyClosingController.class, MarketReportController.class, SalesReportController.class })
+@WebMvcTest({ PosSaleController.class, DailyClosingController.class, MarketReportController.class, SalesReportController.class, HealthController.class })
 @AutoConfigureMockMvc
 @Import({ GlobalExceptionHandler.class, SecurityConfig.class })
 class ProtectedEndpointsSecurityTest {
@@ -71,6 +72,12 @@ class ProtectedEndpointsSecurityTest {
     void unauthenticatedPosRequestReturns401() throws Exception {
         mockMvc.perform(get("/api/pos/sales/open"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void unauthenticatedHealthEndpointsArePublic() throws Exception {
+        mockMvc.perform(get("/health"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -255,6 +262,8 @@ class ProtectedEndpointsSecurityTest {
                 List.of(new PosSaleItemResponse(
                         500L,
                         1000L,
+                        false,
+                        null,
                         10L,
                         "Tienda Ana",
                         "Aro Flor",
@@ -262,6 +271,7 @@ class ProtectedEndpointsSecurityTest {
                         "ANA-001",
                         "7500000000101",
                         1,
+                        9,
                         new BigDecimal("12000.00"),
                         new BigDecimal("12000.00"),
                         BigDecimal.ZERO.setScale(2),

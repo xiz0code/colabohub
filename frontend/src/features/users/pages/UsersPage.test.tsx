@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsersPage } from "@/features/users/pages/UsersPage";
 
@@ -23,9 +23,13 @@ vi.mock("@/features/users/api/userApi", () => ({
 }));
 
 import { listMarkets } from "@/features/markets/api/marketApi";
-import { listUsers } from "@/features/users/api/userApi";
+import { createUser, listUsers } from "@/features/users/api/userApi";
 
 describe("UsersPage", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listMarkets).mockResolvedValue([
@@ -55,6 +59,7 @@ describe("UsersPage", () => {
         monthlyRent: 120000,
         startDate: "2026-03-01",
         standNumber: "Stand 12",
+        factura: false,
         roles: ["STORE_USER"],
         marketIds: [7],
         storeIds: [],
@@ -65,9 +70,9 @@ describe("UsersPage", () => {
     ]);
   });
 
-  it("muestra fecha de creacion y no pide seleccionar espacio a admin de espacio", async () => {
+  it("muestra fecha de creacion y no pide seleccionar espacio a admin de espacio para tiendas", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("stores");
 
     expect(await screen.findByText("Fecha creacion")).toBeInTheDocument();
     expect(await screen.findByText("Camila Soto")).toBeInTheDocument();
@@ -80,10 +85,50 @@ describe("UsersPage", () => {
     });
 
     expect(screen.queryByLabelText("Espacio")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Esta Tienda emite factura")).not.toBeChecked();
+  });
+
+  it("permite crear vendedor sin selector de espacio para admin de espacio", async () => {
+    vi.mocked(createUser).mockResolvedValue({
+      id: 2,
+      email: "seller@colabohub.cl",
+      fullName: "Vendedor Demo",
+      phone: null,
+      contactName: null,
+      description: null,
+      monthlyRent: null,
+      startDate: null,
+      standNumber: null,
+      factura: false,
+      roles: ["SELLER"],
+      marketIds: [7],
+      storeIds: [],
+      active: true,
+      createdAt: "2026-03-16T12:00:00Z",
+      updatedAt: "2026-03-16T12:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    renderPage("sellers");
+
+    await user.click(screen.getByRole("button", { name: "Nuevo vendedor" }));
+
+    expect(screen.getByText("Este vendedor se asignara automaticamente al Espacio activo que administras.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Espacio")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Nombre del vendedor"), "Vendedor Demo");
+    await user.type(screen.getByLabelText("Correo de login"), "seller@colabohub.cl");
+    await user.type(screen.getByLabelText("RUT"), "11.111.111-1");
+    await user.click(screen.getByRole("button", { name: "Crear vendedor" }));
+
+    expect(createUser).toHaveBeenCalled();
+    expect(vi.mocked(createUser).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ role: "SELLER", contactName: "11.111.111-1" }),
+    );
   });
 });
 
-function renderPage() {
+function renderPage(mode: "stores" | "sellers" = "stores") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -94,7 +139,7 @@ function renderPage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <UsersPage />
+      <UsersPage mode={mode} />
     </QueryClientProvider>,
   );
 }

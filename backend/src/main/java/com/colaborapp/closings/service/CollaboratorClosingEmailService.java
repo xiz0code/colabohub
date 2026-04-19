@@ -17,6 +17,7 @@ public class CollaboratorClosingEmailService {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE;
 
     private final MailService mailService;
+    private final ClosingEmailTemplateRenderer templateRenderer;
 
     public void sendDailySummaries(String marketName, LocalDate closingDate, List<CollaboratorSalesSummaryService.CollaboratorSummary> collaborators) {
         for (var collaborator : collaborators) {
@@ -49,7 +50,8 @@ public class CollaboratorClosingEmailService {
                     collaborator.ivaToPayAmount(),
                     collaborator.totalItems(),
                     formatProducts(collaborator.products()));
-            mailService.send(collaborator.collaboratorEmail(), subject, body);
+            String html = templateRenderer.renderCollaboratorDailyHtml(marketName, closingDate, collaborator);
+            mailService.sendHtml(collaborator.collaboratorEmail(), subject, html, body);
         }
     }
 
@@ -82,7 +84,8 @@ public class CollaboratorClosingEmailService {
                 collaborator.ivaToPayAmount(),
                 collaborator.factura() ? "Si" : "No",
                 formatProducts(collaborator.products()));
-        mailService.send(collaborator.collaboratorEmail(), subject, body);
+        String html = templateRenderer.renderCollaboratorMonthlyHtml(marketName, closingMonth, collaborator);
+        mailService.sendHtml(collaborator.collaboratorEmail(), subject, html, body);
     }
 
     private String formatProducts(List<CollaboratorSalesSummaryService.CollaboratorProductSummary> products) {

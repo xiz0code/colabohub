@@ -2,7 +2,9 @@ import { apiFetch } from "@/shared/lib/api/client";
 
 export type PosSaleItem = {
   id: number;
-  productId: number;
+  productId: number | null;
+  manualEntry: boolean;
+  manualReference: string | null;
   storeId: number;
   storeName: string;
   productName: string;
@@ -10,6 +12,7 @@ export type PosSaleItem = {
   sku: string;
   barcode: string;
   quantity: number;
+  availableStock?: number | null;
   baseUnitPrice: number;
   lineBaseSubtotal: number;
   promotionDiscountAmount: number;
@@ -120,6 +123,21 @@ export function addPosSaleItem(saleId: number, productId: number, quantity = 1) 
   return apiFetch<PosSale>(`/api/pos/sales/${saleId}/items`, {
     method: "POST",
     body: JSON.stringify({ productId, quantity }),
+  });
+}
+
+export function addManualPosSaleItem(
+  saleId: number,
+  storeId: number,
+  itemName: string,
+  amount: number,
+  description?: string,
+  reference?: string,
+  quantity = 1,
+) {
+  return apiFetch<PosSale>(`/api/pos/sales/${saleId}/manual-items`, {
+    method: "POST",
+    body: JSON.stringify({ storeId, itemName, amount, description, reference, quantity }),
   });
 }
 

@@ -35,6 +35,7 @@ import com.colaborapp.promotions.domain.ProductPromotion;
 import com.colaborapp.promotions.domain.PromotionType;
 import com.colaborapp.promotions.repository.ProductPromotionRepository;
 import com.colaborapp.security.AccessControlService;
+import com.colaborapp.security.AuthenticatedUserService;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.stores.domain.StoreStatus;
 import com.colaborapp.stores.domain.StoreType;
@@ -179,7 +180,7 @@ class ProductServiceTest {
                 new BigDecimal("15000.00"),
                 null,
                 5,
-                new ProductPromotionRequest(PromotionType.QUANTITY_BLOCK, 3, new BigDecimal("4000.00"), null));
+                new ProductPromotionRequest(PromotionType.QUANTITY_BLOCK, 3, new BigDecimal("4000.00"), null, null, null, null));
 
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(storeService.getStoreEntity(2L, 1L)).thenReturn(store);
@@ -271,6 +272,45 @@ class ProductServiceTest {
     }
 
     @Test
+    void shouldAssignStoreUserAsOwnerWhenCreatingOwnProduct() {
+        ProductCreateRequest request = new ProductCreateRequest(
+                null,
+                99L,
+                "Producto Tienda",
+                "SKU-TIENDA",
+                "Desc",
+                new BigDecimal("5000.00"),
+                null,
+                2,
+                null);
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(accessControlService.hasRole(RoleCode.STORE_USER)).thenReturn(true);
+        when(accessControlService.getCurrentUser()).thenReturn(new AuthenticatedUserService.CurrentAuthenticatedUser(
+                collaborator,
+                List.of("STORE_USER"),
+                true,
+                14L,
+                "Sakura Store",
+                List.of(14L),
+                List.of(),
+                List.of("Sakura Store")));
+        when(accessControlService.currentMarketIds()).thenReturn(List.of(14L));
+        when(marketRepository.findByIdAndTenantId(14L, 1L)).thenReturn(Optional.of(market));
+        when(storeRepository.findByMarketIdAndType(14L, StoreType.STOCK)).thenReturn(Optional.of(store));
+        when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
+        when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-TIENDA")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000399");
+        when(productRepository.existsByBarcode("7500000000399")).thenReturn(false);
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProductResponse response = productService.createProduct(request);
+
+        assertThat(response.ownerUserId()).isEqualTo(7L);
+        assertThat(response.ownerFullName()).isEqualTo("Camila");
+    }
+
+    @Test
     void shouldNotCreateDuplicateStockStoreWhenStockStoreAlreadyExists() {
         ProductCreateRequest request = new ProductCreateRequest(
                 null,
@@ -337,7 +377,7 @@ class ProductServiceTest {
                 new BigDecimal("1200.00"),
                 null,
                 25,
-                new ProductPromotionRequest(PromotionType.PERCENTAGE_DISCOUNT, null, null, new BigDecimal("30.00")));
+                new ProductPromotionRequest(PromotionType.PERCENTAGE_DISCOUNT, null, null, new BigDecimal("30.00"), null, null, null));
 
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(productRepository.findByIdAndTenantId(20L, 1L)).thenReturn(Optional.of(product));
@@ -351,6 +391,6 @@ class ProductServiceTest {
         verify(productAuditService).logChange(product, "Nombre del producto", "Producto Inicial", "Producto Final");
         verify(productAuditService).logChange(product, "Precio", new BigDecimal("1000.00"), new BigDecimal("1200.00"));
         verify(productAuditService).logChange(product, "Stock", 20, 25);
-        verify(productAuditService).logChange(product, "Promocion", "2 x 1500", "30.00% descuento");
+        verify(productAuditService).logChange(product, "Promocion", "2 x 1500", "30.00% descuento en cualquier medio de pago");
     }
 }

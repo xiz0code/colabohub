@@ -73,7 +73,7 @@ class AccessControlServiceTest {
 
         assertThatThrownBy(() -> accessControlService.requireMarketAccess(11L))
                 .isInstanceOf(AccessDeniedException.class)
-                .hasMessage("You do not have permission to perform this action.");
+                .hasMessage("No tienes permiso para realizar esta accion.");
     }
 
     @Test
@@ -91,6 +91,16 @@ class AccessControlServiceTest {
 
         assertThat(accessControlService.canManageUsers()).isTrue();
         assertThat(accessControlService.canManageMarkets()).isFalse();
+    }
+
+    @Test
+    void sellerCanOperatePosAndAccessAssignedMarket() {
+        ColaborAppUserPrincipal principal = principal(List.of("SELLER"), List.of(10L), List.of());
+        when(authenticatedUserService.requireCurrentPrincipal()).thenReturn(principal);
+
+        assertThat(accessControlService.canOperatePos()).isTrue();
+        assertThat(accessControlService.canAccessMarket(principal, 10L)).isTrue();
+        assertThat(accessControlService.canAccessOperationalReports()).isFalse();
     }
 
     private ColaborAppUserPrincipal principal(List<String> roles, List<Long> marketIds, List<Long> storeIds) {

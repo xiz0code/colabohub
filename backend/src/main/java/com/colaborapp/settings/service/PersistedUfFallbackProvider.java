@@ -3,6 +3,7 @@ package com.colaborapp.settings.service;
 import java.math.BigDecimal;
 import java.util.Optional;
 
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import com.colaborapp.markets.repository.MarketRepository;
@@ -11,6 +12,7 @@ import com.colaborapp.sales.repository.UfDailyValueRepository;
 import lombok.RequiredArgsConstructor;
 
 @Component
+@Order(100)
 @RequiredArgsConstructor
 public class PersistedUfFallbackProvider implements UfProvider {
 

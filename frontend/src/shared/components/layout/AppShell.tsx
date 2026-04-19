@@ -1,19 +1,29 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
-import { BrandMark } from "@/shared/components/branding/BrandMark";
+import { PosLauncherProvider, usePosLauncher } from "@/features/sales/components/PosLauncherProvider";
+import { BrandLockup } from "@/shared/components/branding/BrandLockup";
 import { RoleBadge } from "@/shared/components/ui/RoleBadge";
 import { getNavigationItems } from "@/shared/lib/auth/navigation";
 import { APP_BRANDING } from "@/shared/lib/branding";
 
 export function AppShell() {
-  const { user, isLoading, logoutUrl, primaryRole, visibleRoleLabel } = useSession();
-  const canOperatePos = primaryRole === "ADMIN_MARKET";
-  const contextualCta =
+  return (
+    <PosLauncherProvider>
+      <AppShellFrame />
+    </PosLauncherProvider>
+  );
+}
+
+function AppShellFrame() {
+  const { user, isLoading, logoutUrl, primaryRole } = useSession();
+  const { openPos, isOpening } = usePosLauncher();
+  const canOperatePos = primaryRole === "ADMIN_MARKET" || primaryRole === "SELLER";
+  const contextualCta: { to: string; label: string } | { action: "pos"; label: string } | null =
     primaryRole === "ADMIN_SYSTEM"
       ? { to: "/tiendas", label: "Gestionar Espacios" }
       : canOperatePos
-        ? { to: "/sales", label: "Nueva venta" }
+        ? { action: "pos" as const, label: "Nueva venta" }
         : null;
   const visibleNavItems = getNavigationItems(primaryRole);
   const marketSummary =
@@ -22,6 +32,14 @@ export function AppShell() {
       : user?.activeMarketName
         ? user.activeMarketName
         : "Sin Espacio asignado";
+  const profilePrimary =
+    primaryRole === "ADMIN_SYSTEM"
+      ? marketSummary
+      : user?.fullName ?? user?.email ?? "Sesion activa";
+  const profileSecondary =
+    primaryRole === "ADMIN_SYSTEM"
+      ? user?.fullName ?? user?.email ?? "Sesion activa"
+      : marketSummary;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -29,21 +47,28 @@ export function AppShell() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-5">
-              <Link to="/dashboard" className="flex items-center gap-3">
-                <BrandMark />
-                <div>
-                  <p className="text-lg font-semibold tracking-tight">{APP_BRANDING.name}</p>
-                  <p className="text-sm text-muted-foreground">{APP_BRANDING.tagline}</p>
-                </div>
+              <Link to="/dashboard" className="flex items-center gap-5">
+                <BrandLockup size="sm" className="shrink-0" />
               </Link>
 
               {contextualCta ? (
-                <Link
-                  to={contextualCta.to}
-                  className="inline-flex min-h-14 items-center justify-center rounded-[24px] bg-[linear-gradient(135deg,rgba(177,146,239,1),rgba(242,157,206,0.98),rgba(255,196,170,0.96))] px-7 py-3 text-base font-bold text-white shadow-[0_18px_34px_rgba(184,150,228,0.3)] transition duration-200 hover:scale-[1.03] hover:-translate-y-0.5 hover:shadow-[0_20px_38px_rgba(184,150,228,0.36)]"
-                >
-                  {contextualCta.label}
-                </Link>
+                "to" in contextualCta ? (
+                  <Link
+                    to={contextualCta.to}
+                    className="inline-flex min-h-14 items-center justify-center rounded-[24px] bg-[linear-gradient(135deg,rgba(177,146,239,1),rgba(242,157,206,0.98),rgba(255,196,170,0.96))] px-7 py-3 text-base font-bold text-white shadow-[0_18px_34px_rgba(184,150,228,0.3)] transition duration-200 hover:scale-[1.03] hover:-translate-y-0.5 hover:shadow-[0_20px_38px_rgba(184,150,228,0.36)]"
+                  >
+                    {contextualCta.label}
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openPos}
+                    disabled={isOpening}
+                    className="inline-flex min-h-14 items-center justify-center rounded-[24px] bg-[linear-gradient(135deg,rgba(177,146,239,1),rgba(242,157,206,0.98),rgba(255,196,170,0.96))] px-7 py-3 text-base font-bold text-white shadow-[0_18px_34px_rgba(184,150,228,0.3)] transition duration-200 hover:scale-[1.03] hover:-translate-y-0.5 hover:shadow-[0_20px_38px_rgba(184,150,228,0.36)] disabled:opacity-60"
+                  >
+                    {isOpening ? "Preparando venta..." : contextualCta.label}
+                  </button>
+                )
               ) : null}
             </div>
 
@@ -54,11 +79,11 @@ export function AppShell() {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-lg font-semibold tracking-tight text-slate-900">{marketSummary}</p>
-                  <p className="mt-1 truncate text-sm font-medium text-slate-700">{user?.fullName ?? user?.email ?? "Sesion activa"}</p>
+                  <p className="truncate text-[1.35rem] font-semibold tracking-tight text-slate-900">{profilePrimary}</p>
+                  <p className="mt-1 truncate text-sm font-medium text-slate-600">{profileSecondary}</p>
                 </div>
 
-                <div className="hidden shrink-0 sm:block self-center">
+                <div className="hidden self-center sm:block shrink-0">
                   <RoleBadge role={primaryRole} />
                 </div>
               </div>

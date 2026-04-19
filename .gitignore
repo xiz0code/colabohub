@@ -10,4 +10,6 @@ target/
 *.tsbuildinfo
 backend/.mvn/
 backend/.data/
+backend/cloudrun.*.env
+!backend/cloudrun.*.env.example
 frontend/.vite/

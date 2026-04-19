@@ -15,6 +15,7 @@ public interface SaleStoreSummaryRepository extends JpaRepository<SaleStoreSumma
     @Query("""
             select sss from SaleStoreSummary sss
             join fetch sss.store s
+            join fetch s.market market
             where sss.sale.id = :saleId
             order by s.name asc
             """)

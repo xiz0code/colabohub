@@ -183,7 +183,7 @@ export function MarketsPage() {
 
           {!marketsQuery.isLoading && !marketsQuery.isError && (marketsQuery.data?.length ?? 0) === 0 ? (
             <EmptyState
-              title="Todavia no hay Tiendas"
+              title="Todavia no hay Espacios"
               description="Crea el primer Espacio para habilitar su administracion y luego asignar Tiendas."
             />
           ) : (

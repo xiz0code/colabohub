@@ -20,6 +20,8 @@ import com.colaborapp.inventory.domain.StockMovementType;
 import com.colaborapp.inventory.repository.StockMovementRepository;
 import com.colaborapp.markets.domain.Market;
 import com.colaborapp.markets.repository.MarketRepository;
+import com.colaborapp.pickups.domain.PickupStatus;
+import com.colaborapp.pickups.repository.PickupRepository;
 import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
@@ -36,6 +38,7 @@ import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
 import com.colaborapp.sales.web.dto.PosSaleSummaryResponse;
 import com.colaborapp.sales.web.dto.PosPaymentMethodUpdateRequest;
+import com.colaborapp.sales.web.dto.PosManualSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemResponse;
 import com.colaborapp.sales.web.dto.PosSaleItemScanRequest;
@@ -43,6 +46,8 @@ import com.colaborapp.sales.web.dto.PosSaleItemUpdateRequest;
 import com.colaborapp.sales.web.dto.PosSaleResponse;
 import com.colaborapp.sales.web.dto.PosSaleStoreSummaryResponse;
 import com.colaborapp.settings.service.CommissionSettingsService;
+import com.colaborapp.stores.domain.Store;
+import com.colaborapp.stores.repository.StoreRepository;
 import com.colaborapp.users.domain.RoleCode;
 
 import lombok.RequiredArgsConstructor;
@@ -57,8 +62,10 @@ public class PosSaleService {
     private final SaleItemRepository saleItemRepository;
     private final SaleStoreSummaryRepository saleStoreSummaryRepository;
     private final ProductRepository productRepository;
+    private final StoreRepository storeRepository;
     private final StockMovementRepository stockMovementRepository;
     private final MarketRepository marketRepository;
+    private final PickupRepository pickupRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final SaleNumberGenerator saleNumberGenerator;
     private final PosPricingService posPricingService;
@@ -142,7 +149,30 @@ public class PosSaleService {
 
         SaleItem item = saleItemRepository.findBySaleIdAndProductId(saleId, product.getId())
                 .orElseGet(() -> createSaleItem(sale, product));
-        item.setQuantity(item.getQuantity() + request.quantity());
+        int requestedQuantity = item.getQuantity() + request.quantity();
+        ensureProductStockAvailable(product, requestedQuantity);
+        item.setQuantity(requestedQuantity);
+        saleItemRepository.save(item);
+
+        return recalculateSaleTotals(sale);
+    }
+
+    @Transactional
+    public PosSaleResponse addManualItem(Long saleId, PosManualSaleItemRequest request) {
+        requirePosWriteAccess();
+        Sale sale = getOpenSale(saleId);
+        Store store = resolveStoreForManualItem(request.storeId(), sale.getTenant().getId());
+
+        SaleItem item = (request.reference() != null && !request.reference().isBlank())
+                ? saleItemRepository.findBySaleIdAndManualReference(saleId, request.reference().trim()).orElseGet(() -> createManualSaleItem(sale, store, request))
+                : createManualSaleItem(sale, store, request);
+
+        item.setQuantity(request.quantity());
+        item.setBaseUnitPrice(request.amount().setScale(2, HALF_UP));
+        item.setProductNameSnapshot(request.itemName().trim());
+        item.setAppliedPromotionName(normalizeOptionalText(request.description()));
+        item.setManualEntry(true);
+        item.setManualReference(normalizeOptionalText(request.reference()));
         saleItemRepository.save(item);
 
         return recalculateSaleTotals(sale);
@@ -154,7 +184,7 @@ public class PosSaleService {
         String normalizedQuery = request.query().trim();
         int quantity = request.quantity() == null ? 1 : request.quantity();
         if (quantity < 1) {
-            throw new BusinessException("Scanned item quantity must be at least 1.");
+            throw new BusinessException("La cantidad escaneada debe ser al menos 1.");
         }
 
         Sale sale = getOpenSale(saleId);
@@ -168,6 +198,12 @@ public class PosSaleService {
         Sale sale = getOpenSale(saleId);
         SaleItem item = saleItemRepository.findByIdAndSaleId(itemId, saleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sale item not found: " + itemId));
+        if (!item.isManualEntry() && item.getProduct() != null) {
+            Product product = getProductForSale(item.getProduct().getId(), sale.getTenant().getId());
+            ensureProductStockAvailable(product, request.quantity());
+            item.setProduct(product);
+            item.setStore(product.getStore());
+        }
         item.setQuantity(request.quantity());
         saleItemRepository.save(item);
         return recalculateSaleTotals(sale);
@@ -179,6 +215,16 @@ public class PosSaleService {
         Sale sale = getOpenSale(saleId);
         SaleItem item = saleItemRepository.findByIdAndSaleId(itemId, saleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sale item not found: " + itemId));
+        saleItemRepository.delete(item);
+        return recalculateSaleTotals(sale);
+    }
+
+    @Transactional
+    public PosSaleResponse removeManualItemByReference(Long saleId, String reference) {
+        requirePosWriteAccess();
+        Sale sale = getOpenSale(saleId);
+        SaleItem item = saleItemRepository.findBySaleIdAndManualReference(saleId, reference)
+                .orElseThrow(() -> new ResourceNotFoundException("Manual sale item not found for reference: " + reference));
         saleItemRepository.delete(item);
         return recalculateSaleTotals(sale);
     }
@@ -217,12 +263,15 @@ public class PosSaleService {
         Map<Long, Product> lockedProducts = new HashMap<>();
         for (Product product : productRepository.findAllByTenantIdAndIdInForUpdate(
                 sale.getTenant().getId(),
-                items.stream().map(item -> item.getProduct().getId()).distinct().toList())) {
+                items.stream().map(SaleItem::getProduct).filter(java.util.Objects::nonNull).map(Product::getId).distinct().toList())) {
             lockedProducts.put(product.getId(), product);
         }
 
         if (sale.getStatus() == SaleStatus.CONFIRMED) {
             for (SaleItem item : items) {
+                if (item.isManualEntry() || item.getProduct() == null) {
+                    continue;
+                }
                 Product product = lockedProducts.get(item.getProduct().getId());
                 if (product == null) {
                     throw new ResourceNotFoundException("Product not found for sale item: " + item.getProduct().getId());
@@ -250,6 +299,12 @@ public class PosSaleService {
         sale.setCancelledAt(Instant.now());
         sale.setCancelledBy(authenticatedUserService.getCurrentUserSnapshot().user().getEmail());
         sale.setCancellationReason(normalizedReason);
+        pickupRepository.findAllByLinkedSaleId(saleId).forEach(pickup -> {
+            if (pickup.getStatus() != PickupStatus.COLLECTED) {
+                pickup.setLinkedSale(null);
+                pickup.setStatus(PickupStatus.PENDING);
+            }
+        });
         return buildResponse(
                 sale,
                 saleItemRepository.findAllBySaleIdWithDetails(saleId),
@@ -278,7 +333,9 @@ public class PosSaleService {
         }
 
         List<Long> productIds = items.stream()
-                .map(item -> item.getProduct().getId())
+                .map(SaleItem::getProduct)
+                .filter(java.util.Objects::nonNull)
+                .map(Product::getId)
                 .distinct()
                 .toList();
         Map<Long, Product> lockedProducts = new HashMap<>();
@@ -289,17 +346,21 @@ public class PosSaleService {
         }
 
         for (SaleItem item : items) {
+            if (item.isManualEntry() || item.getProduct() == null) {
+                continue;
+            }
             Product product = lockedProducts.get(item.getProduct().getId());
             if (product == null) {
                 throw new ResourceNotFoundException("Product not found for sale item: " + item.getProduct().getId());
             }
 
             if (product.getStatus() != ProductStatus.ACTIVE) {
-                throw new BusinessException("Cannot confirm sale because a product is inactive: " + product.getName());
+                throw new BusinessException("No se puede confirmar la venta porque un producto esta inactivo: " + product.getName());
             }
 
-            if (product.getStock() < item.getQuantity()) {
-                throw new BusinessException("Insufficient stock for product: " + product.getName());
+            int availableStock = stockOf(product);
+            if (availableStock < item.getQuantity()) {
+                throw new BusinessException("Stock insuficiente para " + product.getName() + ". Disponible: " + availableStock + ".");
             }
             item.setProduct(product);
             item.setStore(product.getStore());
@@ -308,6 +369,9 @@ public class PosSaleService {
         RecalculationSnapshot snapshot = recalculateSale(sale, items);
 
         for (SaleItem item : snapshot.items()) {
+            if (item.isManualEntry() || item.getProduct() == null) {
+                continue;
+            }
             Product product = lockedProducts.get(item.getProduct().getId());
             int previousStock = product.getStock();
             int newStock = previousStock - item.getQuantity();
@@ -330,6 +394,11 @@ public class PosSaleService {
         sale.setConfirmedAt(Instant.now());
         persistRecalculation(sale, snapshot);
         saleRepository.save(sale);
+        pickupRepository.findAllByLinkedSaleId(saleId).forEach(pickup -> {
+            pickup.setStatus(PickupStatus.COLLECTED);
+            pickup.setCollectedAt(sale.getConfirmedAt());
+            pickup.setCollectedBy(authenticatedUserService.getCurrentUserSnapshot().user().getEmail());
+        });
 
         return buildResponse(
                 sale,
@@ -364,9 +433,37 @@ public class PosSaleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + productId));
         accessControlService.requireMarketAccess(product.getStore().getMarket().getId());
         if (product.getStatus() != ProductStatus.ACTIVE) {
-            throw new BusinessException("Only active products can be added to a POS sale.");
+            throw new BusinessException("Solo puedes agregar productos activos a la venta.");
         }
         return product;
+    }
+
+    private void ensureProductStockAvailable(Product product, int requestedQuantity) {
+        if (requestedQuantity < 1) {
+            throw new BusinessException("La cantidad debe ser al menos 1.");
+        }
+        int availableStock = stockOf(product);
+        if (availableStock <= 0) {
+            throw new BusinessException("No puedes agregar " + product.getName() + " porque no tiene stock disponible.");
+        }
+        if (requestedQuantity > availableStock) {
+            throw new BusinessException(
+                    "No puedes vender " + requestedQuantity + " unidad(es) de " + product.getName()
+                            + ". Stock disponible: " + availableStock + ".");
+        }
+    }
+
+    private int stockOf(Product product) {
+        return product.getStock() == null ? 0 : product.getStock();
+    }
+
+    private Store resolveStoreForManualItem(Long storeId, Long tenantId) {
+        Store store = storeRepository.findByIdAndTenantId(storeId, tenantId).orElse(null);
+        if (store == null) {
+            throw new ResourceNotFoundException("No encontramos la Tienda para el cobro manual.");
+        }
+        accessControlService.requireStoreAccess(store.getId());
+        return store;
     }
 
     private Optional<Sale> resolveExistingOpenSale(Long tenantId, Long marketId) {
@@ -398,16 +495,16 @@ public class PosSaleService {
     }
 
     private void requirePosWriteAccess() {
-        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET);
+        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
     }
 
     private Long resolveAuthenticatedPosMarketId() {
         var currentUser = authenticatedUserService.getCurrentUserSnapshot();
-        if (!currentUser.roles().contains(RoleCode.ADMIN_MARKET.name())) {
-            throw new BusinessException("Only store administrators can operate the POS.");
+        if (!currentUser.roles().contains(RoleCode.ADMIN_MARKET.name()) && !currentUser.roles().contains(RoleCode.SELLER.name())) {
+            throw new BusinessException("Only authorized sales users can operate the POS.");
         }
         if (currentUser.marketIds().size() != 1) {
-            throw new BusinessException("The authenticated store administrator must be assigned to exactly one tienda to operate the POS.");
+            throw new BusinessException("The authenticated sales user must be assigned to exactly one tienda to operate the POS.");
         }
         return currentUser.marketIds().getFirst();
     }
@@ -431,6 +528,34 @@ public class PosSaleService {
         item.setAppliedPromotionId(null);
         item.setAppliedPromotionName(null);
         // Keep commission columns non-null before the pricing engine recalculates the line.
+        item.setCommission1Amount(ZERO);
+        item.setCommission2Amount(ZERO);
+        item.setCommissionIvaAmount(ZERO);
+        item.setTotalCommissionAmount(ZERO);
+        item.setNetAmount(ZERO);
+        return item;
+    }
+
+    private SaleItem createManualSaleItem(Sale sale, Store store, PosManualSaleItemRequest request) {
+        SaleItem item = new SaleItem();
+        item.setSale(sale);
+        item.setProduct(null);
+        item.setStore(store);
+        item.setProductNameSnapshot(request.itemName().trim());
+        item.setCollaboratorUserId(null);
+        item.setCollaboratorNameSnapshot(store.getName());
+        item.setProductSkuSnapshot("RETIRO");
+        item.setProductBarcodeSnapshot("");
+        item.setManualEntry(true);
+        item.setManualReference(normalizeOptionalText(request.reference()));
+        item.setQuantity(request.quantity());
+        item.setBaseUnitPrice(request.amount().setScale(2, HALF_UP));
+        item.setLineBaseSubtotal(ZERO);
+        item.setPromotionDiscountAmount(ZERO);
+        item.setSubtotal(ZERO);
+        item.setPricingType(com.colaborapp.sales.domain.SaleItemPricingType.NORMAL);
+        item.setAppliedPromotionId(null);
+        item.setAppliedPromotionName(normalizeOptionalText(request.description()));
         item.setCommission1Amount(ZERO);
         item.setCommission2Amount(ZERO);
         item.setCommissionIvaAmount(ZERO);
@@ -492,12 +617,15 @@ public class PosSaleService {
     private Market resolveSingleMarket(List<SaleItem> items) {
         Market market = null;
         for (SaleItem item : items) {
-            if (item.getProduct() == null || item.getProduct().getStore() == null || item.getProduct().getStore().getMarket() == null) {
-                throw new BusinessException("Every product in the sale must belong to a store with a market.");
+            if (item.getStore() == null || item.getStore().getMarket() == null) {
+                throw new BusinessException("Cada item de la venta debe pertenecer a una Tienda dentro del Espacio activo.");
             }
 
-            Market currentMarket = item.getProduct().getStore().getMarket();
-            item.setStore(item.getProduct().getStore());
+            if (item.getProduct() != null && item.getProduct().getStore() != null) {
+                item.setStore(item.getProduct().getStore());
+            }
+
+            Market currentMarket = item.getStore().getMarket();
 
             if (market == null) {
                 market = currentMarket;
@@ -560,6 +688,8 @@ public class PosSaleService {
                     return new PosSaleItemResponse(
                             item.getId(),
                             productId,
+                            item.isManualEntry(),
+                            item.getManualReference(),
                             item.getStore().getId(),
                             item.getStore().getName(),
                             item.getProductNameSnapshot(),
@@ -567,6 +697,7 @@ public class PosSaleService {
                             item.getProductSkuSnapshot(),
                             item.getProductBarcodeSnapshot(),
                             item.getQuantity(),
+                            item.getProduct() != null ? stockOf(item.getProduct()) : null,
                             item.getBaseUnitPrice(),
                             item.getLineBaseSubtotal(),
                             item.getPromotionDiscountAmount(),
@@ -661,5 +792,13 @@ public class PosSaleService {
     private record TaxBreakdown(
             BigDecimal netAmount,
             BigDecimal ivaAmount) {
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isBlank() ? null : normalized;
     }
 }

@@ -3,6 +3,7 @@ package com.colaborapp.products.domain;
 import java.math.BigDecimal;
 
 import com.colaborapp.common.domain.BaseEntity;
+import com.colaborapp.promotions.domain.ProductPromotionGroup;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.tenant.domain.Tenant;
 import com.colaborapp.users.domain.User;
@@ -38,6 +39,10 @@ public class Product extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "owner_user_id")
     private User ownerUser;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "promotion_group_id")
+    private ProductPromotionGroup promotionGroup;
 
     @Column(nullable = false, length = 180)
     private String name;

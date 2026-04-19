@@ -2,8 +2,15 @@ package com.colaborapp.products.service;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -16,6 +23,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.colaborapp.common.exception.BusinessException;
+import com.colaborapp.products.domain.ProductStatus;
+import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.products.web.dto.ProductCreateRequest;
 import com.colaborapp.products.web.dto.ProductImportErrorResponse;
 import com.colaborapp.products.web.dto.ProductImportResponse;
@@ -33,8 +42,16 @@ public class ProductImportService {
 
     private static final String EXPECTED_HEADER =
             "nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor";
+    private static final String EXPECTED_HEADER_WITH_END_DATE =
+            EXPECTED_HEADER + ",promocion_fin";
+    private static final String EXPECTED_HEADER_WITH_GROUP =
+            "nombre,precio,stock,descripcion,colaborador_email,grupo_promocional,promocion_tipo,promocion_valor";
+    private static final String EXPECTED_HEADER_WITH_GROUP_AND_END_DATE =
+            EXPECTED_HEADER_WITH_GROUP + ",promocion_fin";
+    private static final Charset WINDOWS_1252 = Charset.forName("windows-1252");
 
     private final ProductService productService;
+    private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final TransactionTemplate transactionTemplate;
 
@@ -46,10 +63,11 @@ public class ProductImportService {
         List<ProductImportErrorResponse> errors = new ArrayList<>();
         int successCount = 0;
 
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = new BufferedReader(new StringReader(decodeCsv(file)))) {
             String header = reader.readLine();
             validateHeader(header);
+            char delimiter = resolveDelimiter(header);
+            boolean headerIncludesPromotionGroup = includesPromotionGroup(header);
 
             String line;
             int rowNumber = 1;
@@ -61,17 +79,17 @@ public class ProductImportService {
 
                 List<String> values;
                 try {
-                    values = parseCsvLine(line);
+                    values = parseCsvLine(line, delimiter);
                 } catch (BusinessException exception) {
                     errors.add(new ProductImportErrorResponse(rowNumber, line, exception.getMessage()));
                     continue;
                 }
 
-                if (values.size() != 7) {
+                if (values.size() != 7 && values.size() != 8 && values.size() != 9) {
                     errors.add(new ProductImportErrorResponse(
                             rowNumber,
                             line,
-                            "La fila debe tener exactamente 7 columnas siguiendo la plantilla."));
+                            "La fila debe tener las columnas de la plantilla de productos."));
                     continue;
                 }
 
@@ -81,8 +99,12 @@ public class ProductImportService {
                         values.get(2),
                         values.get(3),
                         values.get(4),
-                        values.get(5),
-                        values.get(6));
+                        headerIncludesPromotionGroup ? values.get(5) : "",
+                        headerIncludesPromotionGroup ? values.get(6) : values.get(5),
+                        headerIncludesPromotionGroup ? values.get(7) : values.get(6),
+                        headerIncludesPromotionGroup
+                                ? values.size() == 9 ? values.get(8) : ""
+                                : values.size() == 8 ? values.get(7) : "");
 
                 try {
                     ProductCreateRequest request = buildRequest(row);
@@ -108,9 +130,57 @@ public class ProductImportService {
     }
 
     private void validateHeader(String header) {
-        if (header == null || !EXPECTED_HEADER.equalsIgnoreCase(header.strip())) {
-            throw new BusinessException("La plantilla no coincide. Usa las columnas nombre,precio,stock,descripcion,colaborador_email,promocion_tipo,promocion_valor.");
+        header = stripUtf8Bom(header);
+        String normalizedHeader = normalizeHeader(header);
+        if (normalizedHeader == null
+                || (!EXPECTED_HEADER.equalsIgnoreCase(normalizedHeader)
+                && !EXPECTED_HEADER_WITH_END_DATE.equalsIgnoreCase(normalizedHeader)
+                && !EXPECTED_HEADER_WITH_GROUP.equalsIgnoreCase(normalizedHeader)
+                && !EXPECTED_HEADER_WITH_GROUP_AND_END_DATE.equalsIgnoreCase(normalizedHeader))) {
+            throw new BusinessException("La plantilla no coincide. Usa las columnas nombre,precio,stock,descripcion,colaborador_email,grupo_promocional,promocion_tipo,promocion_valor,promocion_fin.");
         }
+    }
+
+    private boolean includesPromotionGroup(String header) {
+        String normalizedHeader = normalizeHeader(header);
+        return EXPECTED_HEADER_WITH_GROUP.equalsIgnoreCase(normalizedHeader)
+                || EXPECTED_HEADER_WITH_GROUP_AND_END_DATE.equalsIgnoreCase(normalizedHeader);
+    }
+
+    private char resolveDelimiter(String header) {
+        String normalizedHeader = stripUtf8Bom(header);
+        return normalizedHeader != null && normalizedHeader.contains(";") && !normalizedHeader.contains(",") ? ';' : ',';
+    }
+
+    private String normalizeHeader(String header) {
+        if (header == null) {
+            return null;
+        }
+        return stripUtf8Bom(header).strip().replace(';', ',');
+    }
+
+    String decodeCsv(MultipartFile file) throws IOException {
+        byte[] content = file.getBytes();
+        try {
+            return decodeStrict(content, StandardCharsets.UTF_8);
+        } catch (CharacterCodingException exception) {
+            return decodeStrict(content, WINDOWS_1252);
+        }
+    }
+
+    private String decodeStrict(byte[] content, Charset charset) throws CharacterCodingException {
+        CharsetDecoder decoder = charset.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        CharBuffer decoded = decoder.decode(ByteBuffer.wrap(content));
+        return decoded.toString();
+    }
+
+    private String stripUtf8Bom(String value) {
+        if (value == null || value.isEmpty() || value.charAt(0) != '\uFEFF') {
+            return value;
+        }
+        return value.substring(1);
     }
 
     private ProductCreateRequest buildRequest(ProductImportRow row) {
@@ -118,13 +188,16 @@ public class ProductImportService {
         BigDecimal price = parsePrice(row.price());
         Integer stock = parseStock(row.stock());
         User collaborator = resolveCollaborator(row.collaboratorEmail());
-        ProductPromotionRequest promotion = parsePromotion(row.promotionType(), row.promotionValue());
+        ensureProductDoesNotExistForCollaborator(name, collaborator);
+        ProductPromotionRequest promotion = parsePromotion(row.promotionType(), row.promotionValue(), row.promotionEndDate());
 
         return new ProductCreateRequest(
                 null,
                 collaborator.getId(),
                 name,
                 buildSku(name),
+                null,
+                blankToNull(row.promotionGroupName()),
                 blankToNull(row.description()),
                 price,
                 null,
@@ -148,18 +221,24 @@ public class ProductImportService {
         return collaborator;
     }
 
-    private ProductPromotionRequest parsePromotion(String typeValue, String value) {
+    private void ensureProductDoesNotExistForCollaborator(String name, User collaborator) {
+        boolean exists = productRepository.existsByOwnerUserIdAndNameIgnoreCaseAndStatus(
+                collaborator.getId(),
+                name.trim(),
+                ProductStatus.ACTIVE);
+        if (exists) {
+            throw new BusinessException("Producto ya existe para esta Tienda. No se duplico.");
+        }
+    }
+
+    private ProductPromotionRequest parsePromotion(String typeValue, String value, String endDateValue) {
         String normalizedType = blankToNull(typeValue);
         if (normalizedType == null) {
             return null;
         }
 
-        PromotionType type;
-        try {
-            type = PromotionType.valueOf(normalizedType.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException exception) {
-            throw new BusinessException("La promocion debe ser QUANTITY_BLOCK o PERCENTAGE_DISCOUNT.");
-        }
+        PromotionType type = parsePromotionType(normalizedType);
+        LocalDate endDate = parsePromotionEndDate(endDateValue);
 
         if (type == PromotionType.QUANTITY_BLOCK) {
             String normalizedValue = requiredValue(value, "Completa el valor de la promocion por cantidad.");
@@ -172,13 +251,57 @@ public class ProductImportService {
                 throw new BusinessException("La cantidad promocional debe ser 2 o mayor.");
             }
             BigDecimal promotionalPrice = parsePrice(parts[1].trim());
-            return new ProductPromotionRequest(type, quantity, promotionalPrice, null);
+            return new ProductPromotionRequest(type, quantity, promotionalPrice, null, null, null, endDate);
         }
 
         String normalizedValue = requiredValue(value, "Completa el porcentaje de la promocion.");
+        boolean appliesToCash = false;
+        boolean appliesToDebit = false;
+        if (type == PromotionType.PAYMENT_METHOD_DISCOUNT) {
+            String[] parts = normalizedValue.split(":", 2);
+            if (parts.length == 2) {
+                normalizedValue = parts[0];
+                String paymentMethods = normalizeToken(parts[1]);
+                appliesToCash = paymentMethods.contains("EFECTIVO") || paymentMethods.contains("CASH");
+                appliesToDebit = paymentMethods.contains("DEBITO") || paymentMethods.contains("DEBIT");
+            } else {
+                appliesToCash = true;
+                appliesToDebit = true;
+            }
+        }
         normalizedValue = normalizedValue.replace("%", "").trim();
         BigDecimal percentage = parsePositiveDecimal(normalizedValue, "El porcentaje de promocion no es valido.");
-        return new ProductPromotionRequest(type, null, null, percentage);
+        return new ProductPromotionRequest(type, null, null, percentage, appliesToCash, appliesToDebit, endDate);
+    }
+
+    private LocalDate parsePromotionEndDate(String rawValue) {
+        String normalizedValue = blankToNull(rawValue);
+        if (normalizedValue == null) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(normalizedValue.trim());
+        } catch (java.time.format.DateTimeParseException exception) {
+            throw new BusinessException("La fecha de termino de la promocion debe usar el formato AAAA-MM-DD.");
+        }
+    }
+
+    private PromotionType parsePromotionType(String rawType) {
+        String normalizedType = normalizeToken(rawType);
+        return switch (normalizedType) {
+            case "QUANTITY_BLOCK", "CANTIDAD", "PROMOCION_POR_CANTIDAD", "POR_CANTIDAD" -> PromotionType.QUANTITY_BLOCK;
+            case "PERCENTAGE_DISCOUNT", "PORCENTAJE", "DESCUENTO_PORCENTUAL", "DESCUENTO" -> PromotionType.PERCENTAGE_DISCOUNT;
+            case "PAYMENT_METHOD_DISCOUNT", "MEDIO_PAGO", "MEDIOS_DE_PAGO", "DESCUENTO_MEDIO_PAGO" -> PromotionType.PAYMENT_METHOD_DISCOUNT;
+            default -> throw new BusinessException("La promocion debe ser CANTIDAD, PORCENTAJE o MEDIO_PAGO.");
+        };
+    }
+
+    private String normalizeToken(String value) {
+        return Normalizer.normalize(value.trim(), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toUpperCase(Locale.ROOT)
+                .replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("(^_+|_+$)", "");
     }
 
     private BigDecimal parsePrice(String rawValue) {
@@ -236,7 +359,11 @@ public class ProductImportService {
         return Optional.ofNullable(candidate.getMessage()).orElse("No pudimos importar esta fila.");
     }
 
-    private List<String> parseCsvLine(String line) {
+    List<String> parseCsvLine(String line) {
+        return parseCsvLine(line, ',');
+    }
+
+    List<String> parseCsvLine(String line, char delimiter) {
         List<String> values = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean insideQuotes = false;
@@ -254,7 +381,7 @@ public class ProductImportService {
                 continue;
             }
 
-            if (currentChar == ',' && !insideQuotes) {
+            if (currentChar == delimiter && !insideQuotes) {
                 values.add(current.toString().trim());
                 current.setLength(0);
                 continue;
@@ -287,7 +414,9 @@ public class ProductImportService {
             String stock,
             String description,
             String collaboratorEmail,
+            String promotionGroupName,
             String promotionType,
-            String promotionValue) {
+            String promotionValue,
+            String promotionEndDate) {
     }
 }

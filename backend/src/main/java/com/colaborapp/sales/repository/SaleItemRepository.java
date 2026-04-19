@@ -14,8 +14,9 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
 
     @Query("""
             select si from SaleItem si
-            join fetch si.product p
+            left join fetch si.product p
             join fetch si.store s
+            join fetch s.market market
             where si.sale.id = :saleId
             order by si.createdAt asc, si.id asc
             """)
@@ -23,8 +24,9 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
 
     @Query("""
             select si from SaleItem si
-            join fetch si.product p
+            left join fetch si.product p
             join fetch si.store s
+            join fetch s.market market
             where si.sale.id in :saleIds
             order by si.sale.id asc, si.createdAt asc, si.id asc
             """)
@@ -34,10 +36,12 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
 
     Optional<SaleItem> findBySaleIdAndProductId(Long saleId, Long productId);
 
+    Optional<SaleItem> findBySaleIdAndManualReference(Long saleId, String manualReference);
+
     @Query("""
             select si from SaleItem si
             join fetch si.sale sale
-            join fetch si.product product
+            left join fetch si.product product
             join fetch si.store store
             join fetch store.market market
             where sale.tenant.id = :tenantId
@@ -57,7 +61,7 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
     @Query("""
             select si from SaleItem si
             join fetch si.sale sale
-            join fetch si.product product
+            left join fetch si.product product
             join fetch si.store store
             join fetch store.market market
             where sale.tenant.id = :tenantId

@@ -20,8 +20,8 @@ public interface StoreRepository extends JpaRepository<Store, Long> {
               and (:status is null or s.status = :status)
               and (
                   :query is null
-                  or lower(s.code) like lower(concat('%', :query, '%'))
-                  or lower(s.name) like lower(concat('%', :query, '%'))
+                  or lower(s.code) like :query
+                  or lower(s.name) like :query
               )
             """)
     Page<Store> search(
@@ -37,8 +37,8 @@ public interface StoreRepository extends JpaRepository<Store, Long> {
               and (:status is null or s.status = :status)
               and (
                   :query is null
-                  or lower(s.code) like lower(concat('%', :query, '%'))
-                  or lower(s.name) like lower(concat('%', :query, '%'))
+                  or lower(s.code) like :query
+                  or lower(s.name) like :query
               )
             """)
     Page<Store> searchByMarketIds(

@@ -57,6 +57,7 @@ describe("CommissionsPage", () => {
       effectiveCommissionPercentageValue: 0.009,
       globalPromotionEnabled: true,
       globalPromotionPercentage: 25,
+      lowStockAlertThreshold: 2,
     });
 
     vi.mocked(updateMarketCommissionSettings).mockResolvedValue({
@@ -73,6 +74,7 @@ describe("CommissionsPage", () => {
       effectiveCommissionPercentageValue: 0.009,
       globalPromotionEnabled: true,
       globalPromotionPercentage: 30,
+      lowStockAlertThreshold: 2,
     });
 
     vi.mocked(updateMarketUfValue).mockResolvedValue({
@@ -89,6 +91,7 @@ describe("CommissionsPage", () => {
       effectiveCommissionPercentageValue: 0.009,
       globalPromotionEnabled: true,
       globalPromotionPercentage: 25,
+      lowStockAlertThreshold: 2,
     });
   });
 
@@ -104,7 +107,7 @@ describe("CommissionsPage", () => {
     await user.click(screen.getByRole("button", { name: "Guardar promocion global" }));
 
     await waitFor(() => {
-      expect(updateMarketCommissionSettings).toHaveBeenCalledWith(2, true, 0.002, 0.009, true, 30);
+      expect(updateMarketCommissionSettings).toHaveBeenCalledWith(2, true, 0.002, 0.009, true, true, 30, 2);
     });
   });
 
@@ -112,7 +115,7 @@ describe("CommissionsPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByText("Valor UF de la Tienda")).toBeInTheDocument();
+    expect(await screen.findByText("Valor UF del Espacio")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Editar UF" }));
     const ufInput = screen.getAllByLabelText("Valor UF").find((input) => !input.hasAttribute("disabled"));
@@ -141,6 +144,7 @@ describe("CommissionsPage", () => {
       effectiveCommissionPercentageValue: 0.009,
       globalPromotionEnabled: true,
       globalPromotionPercentage: 25,
+      lowStockAlertThreshold: 2,
     });
 
     const user = userEvent.setup();

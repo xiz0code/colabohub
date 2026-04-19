@@ -19,12 +19,15 @@ public class CriticalErrorAlertService {
     private static final Logger log = LoggerFactory.getLogger(CriticalErrorAlertService.class);
 
     private final MailService mailService;
+    private final CriticalAlertEmailTemplateRenderer templateRenderer;
     private final List<String> recipients;
 
     public CriticalErrorAlertService(
             MailService mailService,
+            CriticalAlertEmailTemplateRenderer templateRenderer,
             @Value("${app.alerts.critical-email:}") String configuredRecipients) {
         this.mailService = mailService;
+        this.templateRenderer = templateRenderer;
         this.recipients = Arrays.stream(configuredRecipients.split(","))
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
@@ -36,9 +39,9 @@ public class CriticalErrorAlertService {
             return;
         }
 
-        String subject = "[ColaboHub] Alerta critica en backend";
+        String subject = "[ColaboHub] Alerta crítica en backend";
         String body = """
-                Se detecto un error que requiere revision.
+                Se detectó un error que requiere revisión.
 
                 Endpoint: %s
                 Estado: %s
@@ -51,10 +54,11 @@ public class CriticalErrorAlertService {
                 status.value(),
                 exception.getMessage(),
                 toStackTrace(exception));
+        String html = templateRenderer.renderHtml(status, endpoint, exception, toStackTrace(exception));
 
         for (String recipient : recipients) {
             try {
-                mailService.send(recipient, subject, body);
+                mailService.sendHtml(recipient, subject, html, body);
             } catch (Exception mailException) {
                 log.warn("Critical error alert email could not be sent for endpoint {}", endpoint, mailException);
             }

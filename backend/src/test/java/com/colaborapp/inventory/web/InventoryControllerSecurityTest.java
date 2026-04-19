@@ -51,4 +51,18 @@ class InventoryControllerSecurityTest {
                                 """))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void sellerCannotModifyStock() throws Exception {
+        when(accessControlService.canManageInventory()).thenReturn(false);
+
+        mockMvc.perform(post("/api/inventory/adjustments")
+                        .with(user("seller@correo.cl"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":3,"quantityDelta":1,"reason":"MANUAL"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
 }

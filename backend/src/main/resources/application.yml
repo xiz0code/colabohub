@@ -26,7 +26,8 @@ spring:
               - email
 
 server:
-  port: 8080
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
 
 management:
   endpoints:
@@ -44,6 +45,9 @@ springdoc:
 app:
   frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
   business-zone: ${APP_BUSINESS_ZONE:America/Santiago}
+  mail:
+    enabled: ${APP_MAIL_ENABLED:true}
+    from: ${APP_MAIL_FROM:}
   alerts:
     critical-email: ${APP_ALERTS_CRITICAL_EMAIL:}
   security:

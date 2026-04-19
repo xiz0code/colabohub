@@ -5,16 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProductsPage } from "@/features/products/pages/ProductsPage";
 
+const sessionMock = vi.fn();
+
 vi.mock("@/features/auth/session/SessionProvider", () => ({
-  useSession: () => ({
-    user: {
-      active: true,
-      activeMarketId: 2,
-      marketIds: [2],
-      storeIds: [5],
-      activeMarketName: "Sakura Store",
-    },
-  }),
+  useSession: () => sessionMock(),
 }));
 
 vi.mock("@/features/products/api/productApi", () => ({
@@ -47,6 +41,16 @@ describe("ProductsPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionMock.mockReturnValue({
+      primaryRole: "ADMIN_MARKET",
+      user: {
+        active: true,
+        activeMarketId: 2,
+        marketIds: [2],
+        storeIds: [5],
+        activeMarketName: "Sakura Store",
+      },
+    });
 
     vi.mocked(listProducts).mockResolvedValue({
       content: [
@@ -95,6 +99,7 @@ describe("ProductsPage", () => {
         monthlyRent: null,
         startDate: null,
         standNumber: null,
+        factura: false,
         roles: ["STORE_USER"],
         marketIds: [2],
         storeIds: [5],
@@ -255,6 +260,117 @@ describe("ProductsPage", () => {
     expect(await screen.findByText("Productos creados")).toBeInTheDocument();
     expect(screen.getByText("Fila 3")).toBeInTheDocument();
     expect(screen.getByText("El precio debe ser un numero mayor a 0.")).toBeInTheDocument();
+  });
+
+  it("shows a read-only stock view for sellers", async () => {
+    sessionMock.mockReturnValue({
+      primaryRole: "SELLER",
+      user: {
+        active: true,
+        activeMarketId: 2,
+        marketIds: [2],
+        storeIds: [],
+        activeMarketName: "Sakura Store",
+      },
+    });
+    vi.mocked(listProducts).mockResolvedValue({
+      content: [
+        {
+          id: 10,
+          ownerFullName: "Camila",
+          name: "Sticker BTS",
+          sku: "STICKER-BTS",
+          description: "Pack brillante",
+          price: 2000,
+          salePrice: 0,
+          stock: 12,
+          hasPromotion: true,
+          available: true,
+        },
+        {
+          id: 11,
+          ownerFullName: "PKMSTORE",
+          name: "Album Kpop",
+          sku: "ALBUM-KPOP",
+          description: "Edicion limitada",
+          price: 12000,
+          salePrice: 0,
+          stock: 2,
+          hasPromotion: false,
+          available: true,
+        },
+      ],
+      page: 0,
+      size: 100,
+      totalElements: 1,
+      totalPages: 1,
+      first: true,
+      last: true,
+      empty: false,
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Consulta los productos disponibles de tu Espacio y revisa su stock sin permisos de edicion.")).toBeInTheDocument();
+    expect(await screen.findByText("Sticker BTS")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Crear producto" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Carga masiva" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("$2.000")).toBeInTheDocument();
+    expect(screen.getByText("Productos con stock bajo")).toBeInTheDocument();
+    expect(screen.getAllByText("Album Kpop").length).toBeGreaterThan(0);
+    expect(screen.getByText("2 un.")).toBeInTheDocument();
+  });
+
+  it("lets a tienda create products and print barcode labels", async () => {
+    sessionMock.mockReturnValue({
+      primaryRole: "STORE_USER",
+      user: {
+        id: 7,
+        fullName: "PKMSTORE",
+        active: true,
+        activeMarketId: 2,
+        marketIds: [2],
+        storeIds: [5],
+        activeMarketName: "Fast And Near",
+      },
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("Mi stock")).toBeInTheDocument();
+    expect(screen.getByText("Catalogo activo")).toBeInTheDocument();
+    expect(screen.getAllByText("PKMSTORE").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Sticker BTS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Agregar producto" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Carga masiva" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Historial" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Agregar producto" }));
+    expect(await screen.findByRole("heading", { name: "Agregar producto" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Esta Tienda")).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Nombre del producto"), "Album nuevo");
+    await user.type(screen.getByLabelText("Precio de venta"), "12000");
+    await user.clear(screen.getByLabelText("Stock inicial"));
+    await user.type(screen.getByLabelText("Stock inicial"), "10");
+    await user.click(screen.getByRole("button", { name: "Guardar producto" }));
+
+    await waitFor(() => {
+      expect(createProduct).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerUserId: 7,
+          name: "Album nuevo",
+          initialStock: 10,
+        }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Imprimir codigos" }));
+    expect(await screen.findByRole("heading", { name: "Imprimir codigos de barras" })).toBeInTheDocument();
   });
 });
 

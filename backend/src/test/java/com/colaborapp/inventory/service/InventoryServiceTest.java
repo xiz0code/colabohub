@@ -72,7 +72,7 @@ class InventoryServiceTest {
 
         assertThatThrownBy(() -> inventoryService.adjustStock(new StockAdjustmentRequest(3L, -5, "AJUSTE")))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("The requested stock adjustment would make stock negative.");
+                .hasMessage("La reduccion solicitada dejaria el stock en negativo.");
     }
 
     @Test
@@ -82,7 +82,7 @@ class InventoryServiceTest {
 
         assertThatThrownBy(() -> inventoryService.adjustStock(new StockAdjustmentRequest(3L, 0, "AJUSTE")))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("Stock adjustment quantity must be different from zero.");
+                .hasMessage("La cantidad de ajuste debe ser distinta de 0.");
     }
 
     @Test

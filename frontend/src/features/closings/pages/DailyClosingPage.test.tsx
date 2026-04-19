@@ -26,8 +26,13 @@ vi.mock("@/features/closings/api/closingApi", () => ({
   closeMonthly: vi.fn(),
 }));
 
+vi.mock("@/shared/lib/files/downloadCsv", () => ({
+  downloadCsv: vi.fn(),
+}));
+
 import { closeDaily, closeMonthly, getDailyClosing, getMonthlyClosing } from "@/features/closings/api/closingApi";
 import { listMarkets } from "@/features/markets/api/marketApi";
+import { downloadCsv } from "@/shared/lib/files/downloadCsv";
 
 describe("DailyClosingPage", () => {
   afterEach(() => {
@@ -105,7 +110,7 @@ describe("DailyClosingPage", () => {
       expect(screen.getByRole("option", { name: "Mercado Creativo" })).toBeInTheDocument();
     });
 
-    await user.selectOptions(screen.getByLabelText("Tienda"), "1");
+    await user.selectOptions(screen.getByLabelText("Espacio"), "1");
 
     await waitFor(() => {
       expect(screen.getByText("No existe cierre para esa fecha")).toBeInTheDocument();
@@ -161,7 +166,7 @@ describe("DailyClosingPage", () => {
       expect(screen.getByRole("option", { name: "Mercado Creativo" })).toBeInTheDocument();
     });
 
-    await user.selectOptions(screen.getByLabelText("Tienda"), "1");
+    await user.selectOptions(screen.getByLabelText("Espacio"), "1");
 
     await waitFor(() => {
       expect(screen.getByText("No existe cierre para esa fecha")).toBeInTheDocument();
@@ -236,7 +241,7 @@ describe("DailyClosingPage", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Mensual" }));
-    await user.selectOptions(screen.getByLabelText("Tienda"), "1");
+    await user.selectOptions(screen.getByLabelText("Espacio"), "1");
 
     await waitFor(() => {
       expect(screen.getByText("No existe cierre mensual para ese periodo")).toBeInTheDocument();
@@ -299,7 +304,7 @@ describe("DailyClosingPage", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Mensual" }));
-    await user.selectOptions(screen.getByLabelText("Tienda"), "1");
+    await user.selectOptions(screen.getByLabelText("Espacio"), "1");
     await user.click(screen.getByRole("button", { name: "Generar cierre mensual" }));
 
     expect(screen.getByRole("heading", { name: "Confirmar cierre mensual" })).toBeInTheDocument();
@@ -308,5 +313,87 @@ describe("DailyClosingPage", () => {
     await waitFor(() => {
       expect(closeMonthly).toHaveBeenCalled();
     });
+  });
+
+  it("downloads the daily closing as csv", async () => {
+    vi.mocked(listMarkets).mockResolvedValue([
+      {
+        id: 1,
+        name: "Mercado Creativo",
+        email: "admin@mercado.cl",
+        phone: null,
+        contactName: null,
+        description: null,
+        city: "Santiago",
+        currency: "CLP",
+        ufEnabled: true,
+        active: true,
+        createdAt: "2026-03-15T00:00:00Z",
+        updatedAt: "2026-03-15T00:00:00Z",
+      },
+    ]);
+    vi.mocked(getDailyClosing).mockResolvedValue({
+      marketId: 1,
+      marketName: "Mercado Creativo",
+      closingDate: "2026-03-15",
+      saleCount: 2,
+      totalSalesAmount: 45000,
+      totalCommissionAmount: 3000,
+      totalNetAmount: 42000,
+      closedAt: "2026-03-15T21:00:00Z",
+      closedBy: "Karina",
+      stores: [
+        {
+          storeId: 5,
+          storeName: "PKM Store",
+          saleCount: 2,
+          totalSalesAmount: 45000,
+          totalCommissionAmount: 3000,
+          totalNetAmount: 42000,
+          totalItems: 3,
+        },
+      ],
+    });
+    vi.mocked(getMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
+
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <DailyClosingPage />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Mercado Creativo" })).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByLabelText("Espacio"), "1");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Descargar CSV" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Descargar CSV" }));
+
+    expect(downloadCsv).toHaveBeenCalledWith(
+      "cierre-diario-mercado-creativo-2026-03-15.csv",
+      expect.arrayContaining([
+        expect.objectContaining({
+          tienda: "PKM Store",
+          ventas: 2,
+          items: 3,
+        }),
+      ]),
+    );
   });
 });

@@ -13,9 +13,24 @@ public record ProductCreateRequest(
         Long ownerUserId,
         @NotBlank @Size(max = 180) String name,
         @NotBlank @Size(max = 80) String sku,
+        Long promotionGroupId,
+        @Size(max = 120) String promotionGroupName,
         @Size(max = 1024) String description,
         @NotNull @DecimalMin("0.01") BigDecimal salePrice,
         @DecimalMin("0.00") BigDecimal cost,
         @NotNull @Min(0) Integer initialStock,
         ProductPromotionRequest promotion) {
+
+    public ProductCreateRequest(
+            Long storeId,
+            Long ownerUserId,
+            String name,
+            String sku,
+            String description,
+            BigDecimal salePrice,
+            BigDecimal cost,
+            Integer initialStock,
+            ProductPromotionRequest promotion) {
+        this(storeId, ownerUserId, name, sku, null, null, description, salePrice, cost, initialStock, promotion);
+    }
 }

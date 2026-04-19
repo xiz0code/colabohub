@@ -1,3 +1,10 @@
+server:
+  servlet:
+    session:
+      cookie:
+        same-site: none
+        secure: true
+
 spring:
   datasource:
     url: ${DB_URL}
@@ -20,3 +27,9 @@ logging:
   level:
     org.hibernate.SQL: warn
     org.springframework.security: info
+    com.colaborapp: info
+
+app:
+  frontend-base-url: ${FRONTEND_BASE_URL}
+  mail:
+    enabled: ${APP_MAIL_ENABLED:true}

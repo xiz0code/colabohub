@@ -8,7 +8,7 @@ type RequireRoleProps = {
 };
 
 export function RequireRole({ allowedRoles }: RequireRoleProps) {
-  const { isAuthenticated, isLoading, roles } = useSession();
+  const { isAuthenticated, isLoading, roles, primaryRole } = useSession();
 
   if (isLoading) {
     return <FeedbackMessage kind="info" message="Validando permisos..." />;
@@ -20,7 +20,7 @@ export function RequireRole({ allowedRoles }: RequireRoleProps) {
 
   const isAllowed = roles.some((role) => allowedRoles.includes(role));
   if (!isAllowed) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={primaryRole === "SELLER" ? "/sales" : "/dashboard"} replace />;
   }
 
   return <Outlet />;

@@ -16,5 +16,6 @@ public record MarketFinancialSettingsResponse(
         BigDecimal effectiveCommissionUfValue,
         BigDecimal effectiveCommissionPercentageValue,
         boolean globalPromotionEnabled,
-        BigDecimal globalPromotionPercentage) {
+        BigDecimal globalPromotionPercentage,
+        int lowStockAlertThreshold) {
 }

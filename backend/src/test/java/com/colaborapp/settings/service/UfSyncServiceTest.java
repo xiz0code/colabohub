@@ -6,16 +6,22 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.colaborapp.markets.domain.Market;
 import com.colaborapp.markets.repository.MarketRepository;
+import com.colaborapp.sales.domain.UfDailyValue;
+import com.colaborapp.sales.repository.UfDailyValueRepository;
+import com.colaborapp.tenant.domain.Tenant;
 
 @ExtendWith(MockitoExtension.class)
 class UfSyncServiceTest {
@@ -26,6 +32,9 @@ class UfSyncServiceTest {
     @Mock
     private MarketRepository marketRepository;
 
+    @Mock
+    private UfDailyValueRepository ufDailyValueRepository;
+
     @InjectMocks
     private UfSyncService ufSyncService;
 
@@ -35,6 +44,9 @@ class UfSyncServiceTest {
         automaticMarket.setId(1L);
         automaticMarket.setName("Sakura Store");
         automaticMarket.setUfManualOverride(false);
+        Tenant tenant = new Tenant();
+        tenant.setId(3L);
+        automaticMarket.setTenant(tenant);
 
         Market manualMarket = new Market();
         manualMarket.setId(2L);
@@ -42,10 +54,13 @@ class UfSyncServiceTest {
         manualMarket.setUfManualOverride(true);
         manualMarket.setUfValue(new BigDecimal("34000.00"));
         manualMarket.setUfUpdatedAt(Instant.parse("2026-03-15T10:00:00Z"));
+        manualMarket.setTenant(tenant);
 
         when(ufExternalService.fetchLatestUfValueWithSource())
                 .thenReturn(new UfExternalService.UfValueResult(new BigDecimal("38200.45"), "mindicador.cl", false));
         when(marketRepository.findByActiveTrueOrderByNameAsc()).thenReturn(List.of(automaticMarket, manualMarket));
+        when(ufDailyValueRepository.findByTenantIdAndEffectiveDate(3L, LocalDate.now(java.time.ZoneId.of("America/Santiago"))))
+                .thenReturn(Optional.empty());
 
         ufSyncService.syncDailyUf();
 
@@ -54,5 +69,9 @@ class UfSyncServiceTest {
         assertThat(manualMarket.getUfValue()).isEqualByComparingTo("34000.00");
         assertThat(manualMarket.getUfUpdatedAt()).isEqualTo(Instant.parse("2026-03-15T10:00:00Z"));
         verify(marketRepository).findByActiveTrueOrderByNameAsc();
+        ArgumentCaptor<UfDailyValue> captor = ArgumentCaptor.forClass(UfDailyValue.class);
+        verify(ufDailyValueRepository).save(captor.capture());
+        assertThat(captor.getValue().getUfValue()).isEqualByComparingTo("38200.45");
+        assertThat(captor.getValue().getSource()).isEqualTo("mindicador.cl");
     }
 }

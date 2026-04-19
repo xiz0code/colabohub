@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
@@ -10,6 +10,7 @@ import { FeedbackMessage } from "@/shared/components/feedback/FeedbackMessage";
 import { Modal } from "@/shared/components/ui/Modal";
 import { PageHeader } from "@/shared/components/ui/PageHeader";
 import { ApiError } from "@/shared/lib/api/client";
+import { downloadCsv } from "@/shared/lib/files/downloadCsv";
 
 type ClosingMode = "daily" | "monthly";
 
@@ -101,12 +102,16 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
     !closeMonthlyMutation.isPending &&
     canCloseDay;
 
+  useEffect(() => {
+    setMode(defaultMode);
+  }, [defaultMode]);
+
   return (
     <section>
       <PageHeader
         title="Cierres"
-        description="Consulta y genera cierres diarios o mensuales por Espacio usando snapshots persistidos del POS."
-        eyebrow="Operacion financiera"
+        description="Consolida el resultado diario o mensual de tu Espacio con una vista clara, exportable y lista para control operativo."
+        eyebrow="Centro de cierre"
       />
 
       <div className="mb-6 flex flex-wrap gap-3">
@@ -134,111 +139,176 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
         </Link>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-        <div className="soft-surface p-6">
-          <div className="flex flex-wrap gap-2">
-            <ModeButton label="Diario" active={mode === "daily"} onClick={() => setMode("daily")} />
-            <ModeButton label="Mensual" active={mode === "monthly"} onClick={() => setMode("monthly")} />
-          </div>
+      <div className="soft-surface mb-6 overflow-hidden p-6 md:p-7">
+        <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">
+                {mode === "daily" ? "Cierre diario del Espacio" : "Cierre mensual del Espacio"}
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                {mode === "daily"
+                  ? "Usa esta vista para consolidar la jornada, revisar ventas, comisiones y neto por Tienda antes de cerrar el dia."
+                  : "Usa esta vista para consolidar el mes, revisar IVA, facturacion y resultado por Tienda con un cierre exportable."}
+              </p>
+            </div>
 
-          <h2 className="mt-5 text-lg font-semibold">Parametros de cierre</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {mode === "daily"
-              ? "Selecciona un Espacio y una fecha para consultar o generar el cierre diario."
-              : "Selecciona un Espacio y un mes para consultar o generar el cierre mensual."}
-          </p>
-
-          <div className="mt-4 grid gap-4">
-            <label className="grid gap-2 text-sm">
-              <span>Espacio</span>
-              <select
-                value={effectiveMarketId}
-                onChange={(event) => {
-                  setSelectedMarketId(event.target.value);
-                  setFeedback(null);
-                }}
-                disabled={isAdminMarket}
-                className="rounded-2xl border border-input bg-background/80 px-3 py-2.5 disabled:opacity-70"
-              >
-                <option value="">Selecciona un Espacio</option>
-                {marketOptions.map((market) => (
-                  <option key={market.id} value={market.id}>
-                    {market.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {mode === "daily" ? (
-              <label className="grid gap-2 text-sm">
-                <span>Fecha</span>
-                <input
-                  type="date"
-                  value={closingDate}
-                  onChange={(event) => setClosingDate(event.target.value)}
-                  className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
-                />
-              </label>
-            ) : (
-              <label className="grid gap-2 text-sm">
-                <span>Mes</span>
-                <input
-                  type="month"
-                  value={closingMonth}
-                  onChange={(event) => setClosingMonth(event.target.value)}
-                  className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
-                />
-              </label>
-            )}
-
-            <div className="flex flex-wrap gap-3">
-              {mode === "daily" ? (
-                <>
-                  <button
-                    type="button"
-                    disabled={!canTriggerClosing}
-                    onClick={() => setConfirmOpen(true)}
-                    className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
-                  >
-                    {!canCloseDay ? "Solo lectura" : closeDailyMutation.isPending ? "Cerrando..." : "Generar cierre diario"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={effectiveMarketId.length === 0 || dailyClosingQuery.isFetching || closeDailyMutation.isPending}
-                    onClick={() => {
-                      setFeedback(null);
-                      void dailyClosingQuery.refetch();
-                    }}
-                    className="rounded-full border border-white/90 bg-white/75 px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-50"
-                  >
-                    Consultar cierre
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    disabled={!canTriggerClosing}
-                    onClick={() => setConfirmOpen(true)}
-                    className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
-                  >
-                    {!canCloseDay ? "Solo lectura" : closeMonthlyMutation.isPending ? "Cerrando..." : "Generar cierre mensual"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={effectiveMarketId.length === 0 || monthlyClosingQuery.isFetching || closeMonthlyMutation.isPending}
-                    onClick={() => {
-                      setFeedback(null);
-                      void monthlyClosingQuery.refetch();
-                    }}
-                    className="rounded-full border border-white/90 bg-white/75 px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-50"
-                  >
-                    Consultar cierre
-                  </button>
-                </>
-              )}
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <ClosingHeroCard
+                label="Espacio activo"
+                value={effectiveMarketId ? selectedMarketName : "Sin seleccionar"}
+                tone="violet"
+              />
+              <ClosingHeroCard
+                label={mode === "daily" ? "Fecha de cierre" : "Mes de cierre"}
+                value={mode === "daily" ? closingDate : closingMonth}
+                tone="pink"
+              />
+              <ClosingHeroCard
+                label="Accion preparada"
+                value={mode === "daily" ? "Consolidar dia" : "Consolidar mes"}
+                tone="amber"
+              />
             </div>
           </div>
+
+          <div className="rounded-[28px] border border-white/85 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,245,250,0.95))] p-5 shadow-[0_18px_36px_rgba(186,170,211,0.12)]">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold">Parametros de cierre</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Define el Espacio y el periodo que quieres consultar o consolidar.
+              </p>
+            </div>
+
+            <div className="grid gap-4">
+              <label className="grid gap-2 text-sm">
+                <span>Espacio</span>
+                <select
+                  value={effectiveMarketId}
+                  onChange={(event) => {
+                    setSelectedMarketId(event.target.value);
+                    setFeedback(null);
+                  }}
+                  disabled={isAdminMarket}
+                  className="rounded-2xl border border-input bg-background/80 px-3 py-2.5 disabled:opacity-70"
+                >
+                  <option value="">Selecciona un Espacio</option>
+                  {marketOptions.map((market) => (
+                    <option key={market.id} value={market.id}>
+                      {market.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {mode === "daily" ? (
+                <label className="grid gap-2 text-sm">
+                  <span>Fecha</span>
+                  <input
+                    type="date"
+                    value={closingDate}
+                    onChange={(event) => setClosingDate(event.target.value)}
+                    className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
+                  />
+                </label>
+              ) : (
+                <label className="grid gap-2 text-sm">
+                  <span>Mes</span>
+                  <input
+                    type="month"
+                    value={closingMonth}
+                    onChange={(event) => setClosingMonth(event.target.value)}
+                    className="rounded-2xl border border-input bg-background/80 px-3 py-2.5"
+                  />
+                </label>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {mode === "daily" ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={!canTriggerClosing}
+                      onClick={() => setConfirmOpen(true)}
+                      className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
+                    >
+                      {!canCloseDay ? "Solo lectura" : closeDailyMutation.isPending ? "Cerrando..." : "Generar cierre diario"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={effectiveMarketId.length === 0 || dailyClosingQuery.isFetching || closeDailyMutation.isPending}
+                      onClick={() => {
+                        setFeedback(null);
+                        void dailyClosingQuery.refetch();
+                      }}
+                      className="rounded-full border border-white/90 bg-white/75 px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-50"
+                    >
+                      Consultar cierre
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={!canTriggerClosing}
+                      onClick={() => setConfirmOpen(true)}
+                      className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
+                    >
+                      {!canCloseDay ? "Solo lectura" : closeMonthlyMutation.isPending ? "Cerrando..." : "Generar cierre mensual"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={effectiveMarketId.length === 0 || monthlyClosingQuery.isFetching || closeMonthlyMutation.isPending}
+                      onClick={() => {
+                        setFeedback(null);
+                        void monthlyClosingQuery.refetch();
+                      }}
+                      className="rounded-full border border-white/90 bg-white/75 px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-50"
+                    >
+                      Consultar cierre
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
+        <div className="space-y-4">
+          <ClosingGuideCard
+            title={mode === "daily" ? "Antes de cerrar el dia" : "Antes de cerrar el mes"}
+            items={
+              mode === "daily"
+                ? [
+                    "Confirma que las ventas del POS ya esten cerradas.",
+                    "Revisa que el Espacio seleccionado corresponda a la jornada correcta.",
+                    "Descarga el CSV despues del cierre para respaldo operativo.",
+                  ]
+                : [
+                    "Verifica el mes seleccionado antes de consolidar.",
+                    "Revisa IVA y estado de facturacion por Tienda.",
+                    "Descarga el CSV mensual para control administrativo.",
+                  ]
+            }
+          />
+          <ClosingGuideCard
+            title="Resultado esperado"
+            items={
+              mode === "daily"
+                ? [
+                    "Resumen por Tienda con ventas, items, comision y neto.",
+                    "Registro persistido del cierre para esa fecha.",
+                    "Correo de cierre disparado segun configuracion del entorno.",
+                  ]
+                : [
+                    "Resumen mensual por Tienda con IVA total e IVA a pagar.",
+                    "Registro persistido del mes consultado.",
+                    "Base lista para exportacion y control financiero.",
+                  ]
+            }
+          />
         </div>
 
         <div className="space-y-4">
@@ -389,13 +459,51 @@ function DailyClosingPanel({
               Fecha: {closing.closingDate} | Cerrado por: {closing.closedBy}
             </p>
           </div>
-          <span className="soft-chip">{closing.saleCount} venta(s)</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="soft-chip">{closing.saleCount} venta(s)</span>
+            <button
+              type="button"
+              onClick={() => {
+                downloadCsv(buildDailyClosingFilename(closing), buildDailyClosingRows(closing));
+              }}
+              className="rounded-full border border-white/90 bg-white/80 px-4 py-2 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5"
+            >
+              Descargar CSV
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 text-sm md:grid-cols-3">
           <MetricCard label="Ventas" value={formatMoney(closing.totalSalesAmount)} />
           <MetricCard label="Comisiones" value={formatMoney(closing.totalCommissionAmount)} />
           <MetricCard label="Neto" value={formatMoney(closing.totalNetAmount)} />
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
+            <h3 className="text-base font-semibold">Pulso del cierre</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Lectura rapida del peso relativo de cada Tienda dentro de la jornada consolidada.
+            </p>
+            <div className="mt-4 space-y-3">
+              {closing.stores.map((store) => (
+                <ClosingBar
+                  key={store.storeId}
+                  label={store.storeName}
+                  amount={store.totalSalesAmount}
+                  maxAmount={Math.max(...closing.stores.map((item) => item.totalSalesAmount), 1)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
+            <h3 className="text-base font-semibold">Estado del cierre</h3>
+            <div className="mt-4 grid gap-3">
+              <MetricCard label="Tiendas con movimiento" value={String(closing.stores.length)} />
+              <MetricCard label="Venta promedio" value={formatMoney(closing.saleCount > 0 ? closing.totalSalesAmount / closing.saleCount : 0)} />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -484,7 +592,18 @@ function MonthlyClosingPanel({
               Mes: {closing.closingMonth} | Cerrado por: {closing.closedBy}
             </p>
           </div>
-          <span className="soft-chip">{closing.saleCount} venta(s)</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="soft-chip">{closing.saleCount} venta(s)</span>
+            <button
+              type="button"
+              onClick={() => {
+                downloadCsv(buildMonthlyClosingFilename(closing), buildMonthlyClosingRows(closing));
+              }}
+              className="rounded-full border border-white/90 bg-white/80 px-4 py-2 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5"
+            >
+              Descargar CSV
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-5">
@@ -493,6 +612,33 @@ function MonthlyClosingPanel({
           <MetricCard label="Neto" value={formatMoney(closing.totalNetAmount)} />
           <MetricCard label="IVA total" value={formatMoney(closing.totalIvaAmount)} />
           <MetricCard label="IVA a pagar" value={formatMoney(closing.totalIvaToPayAmount)} />
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
+            <h3 className="text-base font-semibold">Peso de ventas por Tienda</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Comparativo visual para detectar rapido que Tiendas movieron mas venta en el mes.
+            </p>
+            <div className="mt-4 space-y-3">
+              {closing.collaborators.map((collaborator) => (
+                <ClosingBar
+                  key={collaborator.collaboratorUserId}
+                  label={collaborator.collaboratorName}
+                  amount={collaborator.totalSalesAmount}
+                  maxAmount={Math.max(...closing.collaborators.map((item) => item.totalSalesAmount), 1)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
+            <h3 className="text-base font-semibold">Lectura del mes</h3>
+            <div className="mt-4 grid gap-3">
+              <MetricCard label="Tiendas incluidas" value={String(closing.collaborators.length)} />
+              <MetricCard label="Ticket promedio" value={formatMoney(closing.saleCount > 0 ? closing.totalSalesAmount / closing.saleCount : 0)} />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -547,20 +693,62 @@ function MonthlyClosingPanel({
   );
 }
 
-function ModeButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function ClosingHeroCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "violet" | "pink" | "amber";
+}) {
+  const toneClass =
+    tone === "violet"
+      ? "from-[rgba(243,238,255,0.98)] to-[rgba(255,245,252,0.96)]"
+      : tone === "pink"
+        ? "from-[rgba(255,242,248,0.98)] to-[rgba(255,249,241,0.96)]"
+        : "from-[rgba(255,249,238,0.98)] to-[rgba(255,244,251,0.96)]";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "rounded-full px-4 py-2 text-sm font-semibold transition",
-        active
-          ? "bg-[linear-gradient(135deg,rgba(194,166,246,1),rgba(249,188,219,0.96))] text-white shadow-[0_10px_24px_rgba(187,156,232,0.22)]"
-          : "border border-white/90 bg-white/75 text-muted-foreground shadow-sm hover:text-foreground",
-      ].join(" ")}
-    >
-      {label}
-    </button>
+    <div className={`rounded-[24px] border border-white/85 bg-gradient-to-br ${toneClass} p-4 shadow-sm`}>
+      <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p className="mt-3 text-lg font-semibold tracking-tight text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function ClosingGuideCard({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="soft-surface p-5">
+      <h3 className="text-base font-semibold">{title}</h3>
+      <div className="mt-4 space-y-3">
+        {items.map((item) => (
+          <div key={item} className="flex items-start gap-3 rounded-[18px] border border-white/80 bg-white/65 px-4 py-3 shadow-sm">
+            <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,rgba(194,166,246,1),rgba(249,188,219,0.96))] text-xs font-bold text-white">
+              •
+            </span>
+            <p className="text-sm leading-6 text-muted-foreground">{item}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClosingBar({ label, amount, maxAmount }: { label: string; amount: number; maxAmount: number }) {
+  const width = maxAmount > 0 ? Math.max((amount / maxAmount) * 100, 8) : 0;
+
+  return (
+    <div className="grid gap-2 md:grid-cols-[180px_1fr_120px] md:items-center">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      <div className="h-3 overflow-hidden rounded-full bg-secondary/70">
+        <div
+          className="h-full rounded-full bg-[linear-gradient(135deg,rgba(163,128,255,0.96),rgba(255,153,194,0.92))]"
+          style={{ width: `${width}%` }}
+        />
+      </div>
+      <span className="text-sm font-semibold text-foreground md:text-right">{formatMoney(amount)}</span>
+    </div>
   );
 }
 
@@ -591,4 +779,53 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function buildDailyClosingFilename(closing: DailyClosing) {
+  return `cierre-diario-${slugify(closing.marketName)}-${closing.closingDate}.csv`;
+}
+
+function buildMonthlyClosingFilename(closing: MonthlyClosing) {
+  return `cierre-mensual-${slugify(closing.marketName)}-${closing.closingMonth}.csv`;
+}
+
+function buildDailyClosingRows(closing: DailyClosing) {
+  return closing.stores.map((store) => ({
+    espacio: closing.marketName,
+    fecha_cierre: closing.closingDate,
+    cerrado_por: closing.closedBy,
+    tienda: store.storeName,
+    ventas: store.saleCount,
+    items: store.totalItems,
+    monto_ventas: store.totalSalesAmount,
+    comision: store.totalCommissionAmount,
+    neto: store.totalNetAmount,
+  }));
+}
+
+function buildMonthlyClosingRows(closing: MonthlyClosing) {
+  return closing.collaborators.map((collaborator) => ({
+    espacio: closing.marketName,
+    mes_cierre: closing.closingMonth,
+    cerrado_por: closing.closedBy,
+    tienda: collaborator.collaboratorName,
+    correo: collaborator.collaboratorEmail,
+    factura: collaborator.factura ? "Si" : "No",
+    ventas: collaborator.saleCount,
+    items: collaborator.totalItems,
+    monto_ventas: collaborator.totalSalesAmount,
+    comision: collaborator.totalCommissionAmount,
+    neto: collaborator.totalNetAmount,
+    iva_total: collaborator.totalIvaAmount,
+    iva_a_pagar: collaborator.ivaToPayAmount,
+  }));
 }

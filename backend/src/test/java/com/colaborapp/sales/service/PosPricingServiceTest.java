@@ -17,6 +17,7 @@ import com.colaborapp.markets.domain.Market;
 import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.promotions.domain.ProductPromotion;
+import com.colaborapp.promotions.domain.ProductPromotionGroup;
 import com.colaborapp.promotions.domain.PromotionType;
 import com.colaborapp.promotions.repository.ProductPromotionRepository;
 import com.colaborapp.sales.domain.PaymentMethod;
@@ -165,16 +166,18 @@ class PosPricingServiceTest {
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
         when(commissionSettingsService.useDynamicFixedCommission()).thenReturn(false);
 
-        SaleItem anaItem = saleItem(product(501L, storeAna, collaboratorAna, "Aro Flor", new BigDecimal("10000.00")), 1);
-        SaleItem luciaItem = saleItem(product(502L, storeLucia, collaboratorLucia, "Collar Luna", new BigDecimal("8000.00")), 1);
+        SaleItem firstItem = saleItem(product(501L, storeAna, collaboratorAna, "Pelota", new BigDecimal("10000.00")), 1);
+        SaleItem secondItem = saleItem(product(502L, storeLucia, collaboratorLucia, "Polera", new BigDecimal("8000.00")), 10);
+        SaleItem thirdItem = saleItem(product(503L, storeAna, collaboratorAna, "Zapatos", new BigDecimal("12000.00")), 4);
 
         posPricingService.calculateSalePricing(
-                List.of(anaItem, luciaItem),
+                List.of(firstItem, secondItem, thirdItem),
                 PaymentMethod.DEBITO,
-                new BigDecimal("10000.00"));
+                new BigDecimal("39053.25"));
 
-        assertThat(anaItem.getCommission1Amount()).isEqualByComparingTo("8");
-        assertThat(luciaItem.getCommission1Amount()).isEqualByComparingTo("8");
+        assertThat(firstItem.getCommission1Amount()).isEqualByComparingTo("22");
+        assertThat(secondItem.getCommission1Amount()).isEqualByComparingTo("22");
+        assertThat(thirdItem.getCommission1Amount()).isEqualByComparingTo("22");
     }
 
     @Test
@@ -198,6 +201,93 @@ class PosPricingServiceTest {
         assertThat(item.getPromotionDiscountAmount()).isEqualByComparingTo("1200.00");
         assertThat(item.getAppliedPromotionName()).isEqualTo("30% descuento");
         assertThat(result.totalAmount()).isEqualByComparingTo("2800.00");
+    }
+
+    @Test
+    void shouldApplyPaymentMethodPromotionOnlyForConfiguredPaymentMethod() {
+        Product product = product(410L, storeAna, collaboratorAna, "Porta credencial", new BigDecimal("10000.00"));
+        ProductPromotion promotion = new ProductPromotion();
+        promotion.setId(13L);
+        promotion.setProduct(product);
+        promotion.setType(PromotionType.PAYMENT_METHOD_DISCOUNT);
+        promotion.setPercentageDiscount(new BigDecimal("10.00"));
+        promotion.setAppliesToCash(true);
+        promotion.setAppliesToDebit(false);
+        promotion.setName("10% descuento con efectivo");
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotion));
+
+        SaleItem cashItem = saleItem(product, 1);
+        posPricingService.calculateSalePricing(List.of(cashItem), PaymentMethod.CASH, null);
+
+        assertThat(cashItem.getSubtotal()).isEqualByComparingTo("9000.00");
+        assertThat(cashItem.getAppliedPromotionName()).isEqualTo("10% descuento con efectivo");
+
+        SaleItem debitItem = saleItem(product, 1);
+        posPricingService.calculateSalePricing(List.of(debitItem), PaymentMethod.DEBITO, new BigDecimal("39053.25"));
+
+        assertThat(debitItem.getLineBaseSubtotal()).isEqualByComparingTo("10000.00");
+        assertThat(debitItem.getPromotionDiscountAmount()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void shouldApplyQuantityPromotionAcrossProductsInSamePromotionGroup() {
+        ProductPromotionGroup group = promotionGroup(70L, "Photocards", storeAna);
+        Product photocardA = product(601L, storeAna, collaboratorAna, "Photocard A", new BigDecimal("1000.00"));
+        Product photocardB = product(602L, storeAna, collaboratorAna, "Photocard B", new BigDecimal("1000.00"));
+        photocardA.setPromotionGroup(group);
+        photocardB.setPromotionGroup(group);
+
+        ProductPromotion promotion = new ProductPromotion();
+        promotion.setId(90L);
+        promotion.setProduct(photocardA);
+        promotion.setType(PromotionType.QUANTITY_BLOCK);
+        promotion.setBlockQuantity(2);
+        promotion.setBlockPrice(new BigDecimal("1500.00"));
+        promotion.setName("2 x 1500");
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotion));
+
+        SaleItem itemA = saleItem(photocardA, 1);
+        SaleItem itemB = saleItem(photocardB, 1);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(itemA, itemB),
+                PaymentMethod.CASH,
+                null);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("1500.00");
+        assertThat(result.totalDiscountAmount()).isEqualByComparingTo("500.00");
+        assertThat(itemA.getAppliedPromotionName()).isEqualTo("2 x 1500 (grupo Photocards)");
+        assertThat(itemB.getAppliedPromotionName()).isEqualTo("2 x 1500 (grupo Photocards)");
+    }
+
+    @Test
+    void shouldDisplayGroupedQuantityPromotionByLineWhenLineCompletesBlocks() {
+        ProductPromotionGroup group = promotionGroup(71L, "PC", storeAna);
+        Product photocardA = product(611L, storeAna, collaboratorAna, "Photocard BTS", new BigDecimal("1000.00"));
+        Product photocardB = product(612L, storeAna, collaboratorAna, "Photocard TXT", new BigDecimal("1000.00"));
+        photocardA.setPromotionGroup(group);
+        photocardB.setPromotionGroup(group);
+
+        ProductPromotion promotion = new ProductPromotion();
+        promotion.setId(91L);
+        promotion.setProduct(photocardA);
+        promotion.setType(PromotionType.QUANTITY_BLOCK);
+        promotion.setBlockQuantity(2);
+        promotion.setBlockPrice(new BigDecimal("1500.00"));
+        promotion.setName("2 x 1500");
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotion));
+
+        SaleItem itemA = saleItem(photocardA, 3);
+        SaleItem itemB = saleItem(photocardB, 2);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(itemA, itemB),
+                PaymentMethod.CASH,
+                null);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("4000.00");
+        assertThat(itemA.getSubtotal()).isEqualByComparingTo("2500.00");
+        assertThat(itemB.getSubtotal()).isEqualByComparingTo("1500.00");
     }
 
     @Test
@@ -257,6 +347,15 @@ class PosPricingServiceTest {
         product.setStock(10);
         product.setVersion(0L);
         return product;
+    }
+
+    private ProductPromotionGroup promotionGroup(Long id, String name, Store store) {
+        ProductPromotionGroup group = new ProductPromotionGroup();
+        group.setId(id);
+        group.setTenant(tenant);
+        group.setStore(store);
+        group.setName(name);
+        return group;
     }
 
     private SaleItem saleItem(Product product, int quantity) {

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SalesPage } from "@/features/sales/pages/SalesPage";
 
+const openPosMock = vi.fn();
+
 vi.mock("@/features/auth/session/SessionProvider", () => ({
   useSession: () => ({
     user: {
@@ -19,6 +21,14 @@ vi.mock("@/features/auth/session/SessionProvider", () => ({
       storeIds: [],
     },
     primaryRole: "ADMIN_MARKET",
+  }),
+}));
+
+vi.mock("@/features/sales/components/PosLauncherProvider", () => ({
+  usePosLauncher: () => ({
+    openPos: openPosMock,
+    canOperatePos: true,
+    isOpening: false,
   }),
 }));
 
@@ -73,6 +83,8 @@ function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
       {
         id: 99,
         productId: 1000,
+        manualEntry: false,
+        manualReference: null,
         storeId: 200,
         storeName: "Tienda Central",
         productName: "Sticker BTS",
@@ -157,63 +169,19 @@ describe("SalesPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    openPosMock.mockReset();
     vi.mocked(listPosSales).mockResolvedValue(buildSales());
-    vi.mocked(createPosSale).mockResolvedValue(buildSale("OPEN"));
     vi.mocked(getPosSale).mockResolvedValue(buildSale("CONFIRMED"));
     vi.mocked(searchPosProducts).mockResolvedValue([]);
   });
 
-  it("abre una nueva venta sin selector de Espacio y muestra el total a cobrar", async () => {
+  it("usa el launcher global al pedir una nueva venta", async () => {
     renderPage();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Nueva venta" }));
 
-    await waitFor(() => {
-      expect(screen.getByText(/TOTAL A COBRAR/i)).toBeInTheDocument();
-    });
-
-    expect(screen.queryByLabelText("Espacio activo")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Ventas de Sakura Store/i })).toBeInTheDocument();
-    expect(screen.getAllByText("$28.900").length).toBeGreaterThan(0);
-  });
-
-  it("requiere modal de confirmacion antes de confirmar la venta", async () => {
-    renderPage();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirmar venta" })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Confirmar venta" }));
-
-    expect(screen.getByText("Deseas confirmar esta venta?")).toBeInTheDocument();
-    expect(vi.mocked(confirmPosSale)).not.toHaveBeenCalled();
-  });
-
-  it("confirma la venta y refresca el listado principal", async () => {
-    vi.mocked(confirmPosSale).mockResolvedValue(buildSale("CONFIRMED"));
-
-    renderPage();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirmar venta" })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Confirmar venta" }));
-    await user.click(screen.getAllByRole("button", { name: "Confirmar venta" })[1]);
-
-    await waitFor(() => {
-      expect(screen.getByText("Venta registrada correctamente")).toBeInTheDocument();
-    });
-
-    expect(listPosSales).toHaveBeenCalled();
-    expect(screen.getByText("Ventas de Sakura Store")).toBeInTheDocument();
+    expect(openPosMock).toHaveBeenCalledTimes(1);
   });
 
   it("muestra el detalle de venta con tienda y datos de comision", async () => {
@@ -263,97 +231,4 @@ describe("SalesPage", () => {
     });
   });
 
-  it("intercepta el cierre del POS cuando ya hay productos y permite seguir vendiendo", async () => {
-    renderPage();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/TOTAL A COBRAR/i)).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Cerrar" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Cancelar venta en curso")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "Seguir vendiendo" }));
-
-    expect(screen.queryByText("Cancelar venta en curso")).not.toBeInTheDocument();
-    expect(cancelPosSale).not.toHaveBeenCalled();
-    expect(screen.getByText(/TOTAL A COBRAR/i)).toBeInTheDocument();
-  });
-
-  it("calcula vuelto cuando la venta se cobra en efectivo", async () => {
-    vi.mocked(updatePosPaymentMethod).mockResolvedValue({
-      ...buildSale("OPEN"),
-      paymentMethod: "CASH",
-    });
-
-    renderPage();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("combobox")).toBeInTheDocument();
-    });
-
-    await user.selectOptions(screen.getByRole("combobox"), "CASH");
-
-    await waitFor(() => {
-      expect(screen.getByText("Monto recibido")).toBeInTheDocument();
-    });
-
-    await user.type(screen.getByPlaceholderText("Ingresa el efectivo recibido"), "30000");
-
-    expect(screen.getByText("$1.100")).toBeInTheDocument();
-  });
-
-  it("muestra el nombre de la tienda duena del producto en los resultados de busqueda del POS", async () => {
-    vi.mocked(searchPosProducts).mockResolvedValue([
-      {
-        id: 201,
-        storeId: 200,
-        storeName: "Stock principal",
-        collaboratorName: "Camila",
-        name: "Photocard",
-        sku: "PHOTOCARDS",
-        barcode: "BAR-201",
-        stock: 9,
-        salePrice: 2000,
-      },
-      {
-        id: 202,
-        storeId: 200,
-        storeName: "Stock principal",
-        collaboratorName: "Karina",
-        name: "Photocard K-pop",
-        sku: "PHOTOCARDS-KPOP",
-        barcode: "BAR-202",
-        stock: 498,
-        salePrice: 1000,
-      },
-    ]);
-
-    renderPage();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Nueva venta" }));
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText("Busca por nombre, SKU o codigo de barras")).toBeInTheDocument();
-    });
-
-    await user.type(screen.getByPlaceholderText("Busca por nombre, SKU o codigo de barras"), "Photo");
-
-    await waitFor(() => {
-      expect(screen.getByText("Tienda: Camila")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("Tienda: Karina")).toBeInTheDocument();
-    expect(screen.queryByText("Tienda: Stock principal")).not.toBeInTheDocument();
-  });
 });

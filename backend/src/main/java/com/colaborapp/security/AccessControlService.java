@@ -35,15 +35,23 @@ public class AccessControlService {
         return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET);
     }
 
+    public boolean canManageOwnCatalog() {
+        return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.STORE_USER);
+    }
+
     public boolean canManageInventory() {
         return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR);
     }
 
     public boolean canOperatePos() {
-        return hasRole(RoleCode.ADMIN_MARKET);
+        return hasRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
     }
 
     public boolean canReadInventory() {
+        return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR, RoleCode.STORE_USER, RoleCode.SELLER);
+    }
+
+    public boolean canReadInventoryDetails() {
         return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR, RoleCode.STORE_USER);
     }
 
@@ -98,7 +106,7 @@ public class AccessControlService {
         if (isSystemAdmin(user)) {
             return true;
         }
-        if (hasRole(user, RoleCode.ADMIN_MARKET) || hasRole(user, RoleCode.COLLABORATOR)) {
+        if (hasRole(user, RoleCode.ADMIN_MARKET) || hasRole(user, RoleCode.COLLABORATOR) || hasRole(user, RoleCode.SELLER)) {
             return user.marketIds() != null && user.marketIds().contains(marketId);
         }
         if (hasRole(user, RoleCode.STORE_USER)) {
@@ -165,6 +173,6 @@ public class AccessControlService {
 
     private void deny(String message) {
         log.warn("Access denied: {}", message);
-        throw new AccessDeniedException("You do not have permission to perform this action.");
+        throw new AccessDeniedException("No tienes permiso para realizar esta accion.");
     }
 }

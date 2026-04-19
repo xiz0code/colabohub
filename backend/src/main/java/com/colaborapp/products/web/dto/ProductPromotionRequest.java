@@ -1,6 +1,7 @@
 package com.colaborapp.products.web.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 import com.colaborapp.promotions.domain.PromotionType;
 
@@ -12,5 +13,8 @@ public record ProductPromotionRequest(
         @NotNull PromotionType type,
         @Min(2) Integer quantity,
         @DecimalMin("0.01") BigDecimal promotionalPrice,
-        @DecimalMin("0.01") BigDecimal percentageDiscount) {
+        @DecimalMin("0.01") BigDecimal percentageDiscount,
+        Boolean appliesToCash,
+        Boolean appliesToDebit,
+        LocalDate endsAt) {
 }

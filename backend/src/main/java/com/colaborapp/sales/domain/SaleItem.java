@@ -29,8 +29,8 @@ public class SaleItem extends BaseEntity {
     @JoinColumn(name = "sale_id", nullable = false)
     private Sale sale;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "product_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id")
     private Product product;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -45,6 +45,12 @@ public class SaleItem extends BaseEntity {
 
     @Column(nullable = false, length = 64)
     private String productBarcodeSnapshot;
+
+    @Column(nullable = false)
+    private boolean manualEntry = false;
+
+    @Column(length = 120)
+    private String manualReference;
 
     @Column
     private Long collaboratorUserId;

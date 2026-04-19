@@ -9,12 +9,14 @@ describe("RoleBadge", () => {
       <div>
         <RoleBadge role="ADMIN_SYSTEM" />
         <RoleBadge role="ADMIN_MARKET" />
+        <RoleBadge role="SELLER" />
         <RoleBadge role="STORE_USER" />
       </div>,
     );
 
     expect(screen.getByText("Administrador General")).toBeInTheDocument();
     expect(screen.getByText("Administrador de Espacio")).toBeInTheDocument();
+    expect(screen.getByText("Vendedor")).toBeInTheDocument();
     expect(screen.getByText("Tienda")).toBeInTheDocument();
   });
 });

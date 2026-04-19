@@ -34,16 +34,16 @@ public class InventoryService {
         accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR);
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         Product product = getProductEntity(request.productId(), tenantId);
-        accessControlService.requireStoreAccess(product.getStore().getId());
+        requireProductInventoryWriteAccess(product);
         if (request.quantityDelta() == 0) {
-            throw new BusinessException("Stock adjustment quantity must be different from zero.");
+            throw new BusinessException("La cantidad de ajuste debe ser distinta de 0.");
         }
 
         int previousStock = product.getStock();
         int newStock = previousStock + request.quantityDelta();
 
         if (newStock < 0) {
-            throw new BusinessException("The requested stock adjustment would make stock negative.");
+            throw new BusinessException("La reduccion solicitada dejaria el stock en negativo.");
         }
 
         product.setStock(newStock);
@@ -64,7 +64,7 @@ public class InventoryService {
     public List<StockMovementResponse> getProductMovements(Long productId) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         Product product = getProductEntity(productId, tenantId);
-        accessControlService.requireStoreAccess(product.getStore().getId());
+        requireProductReadAccess(product);
 
         return stockMovementRepository.findByProductIdOrderByCreatedAtDesc(productId).stream()
                 .map(this::toResponse)
@@ -116,5 +116,25 @@ public class InventoryService {
                 movement.getReferenceId(),
                 movement.getCreatedAt(),
                 movement.getCreatedBy());
+    }
+
+    private void requireProductReadAccess(Product product) {
+        if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+            Long currentUserId = accessControlService.getCurrentUser().user().getId();
+            Long ownerUserId = product.getOwnerUser() != null ? product.getOwnerUser().getId() : null;
+            if (currentUserId != null && currentUserId.equals(ownerUserId)) {
+                return;
+            }
+        }
+
+        accessControlService.requireStoreAccess(product.getStore().getId());
+    }
+
+    private void requireProductInventoryWriteAccess(Product product) {
+        if (product.getStore() != null && product.getStore().getMarket() != null && product.getStore().getMarket().getId() != null) {
+            accessControlService.requireMarketAccess(product.getStore().getMarket().getId());
+            return;
+        }
+        accessControlService.requireStoreAccess(product.getStore().getId());
     }
 }

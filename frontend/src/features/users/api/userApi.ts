@@ -1,6 +1,6 @@
 import { apiFetch } from "@/shared/lib/api/client";
 
-export type UserRole = "ADMIN_SYSTEM" | "ADMIN_MARKET" | "COLLABORATOR" | "STORE_USER";
+export type UserRole = "ADMIN_SYSTEM" | "ADMIN_MARKET" | "SELLER" | "COLLABORATOR" | "STORE_USER";
 
 export type AppUser = {
   id: number;
@@ -12,6 +12,7 @@ export type AppUser = {
   monthlyRent: number | null;
   startDate: string | null;
   standNumber: string | null;
+  factura: boolean;
   roles: string[];
   marketIds: number[];
   storeIds: number[];
@@ -29,6 +30,7 @@ export type UpsertUserInput = {
   monthlyRent?: number;
   startDate?: string;
   standNumber?: string;
+  factura?: boolean;
   role: UserRole;
   marketIds?: number[];
   storeIds?: number[];

@@ -198,6 +198,8 @@ class PosSaleControllerTest {
                 List.of(new PosSaleItemResponse(
                         500L,
                         1000L,
+                        false,
+                        null,
                         10L,
                         "Tienda Ana",
                         "Aro Flor",
@@ -205,6 +207,7 @@ class PosSaleControllerTest {
                         "ANA-001",
                         "7500000000101",
                         1,
+                        9,
                         new BigDecimal("12000.00"),
                         new BigDecimal("12000.00"),
                         BigDecimal.ZERO.setScale(2),

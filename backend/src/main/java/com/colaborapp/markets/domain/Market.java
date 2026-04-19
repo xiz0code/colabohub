@@ -68,4 +68,7 @@ public class Market extends BaseEntity {
 
     @Column(precision = 5, scale = 2)
     private BigDecimal globalPromotionPercentage;
+
+    @Column(nullable = false)
+    private int lowStockAlertThreshold = 2;
 }

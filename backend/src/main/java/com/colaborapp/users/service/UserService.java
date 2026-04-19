@@ -178,7 +178,7 @@ public class UserService {
             return false;
         }
 
-        if (user.getRoles().stream().noneMatch(role -> role.getCode() == RoleCode.STORE_USER)) {
+        if (user.getRoles().stream().noneMatch(role -> role.getCode() == RoleCode.STORE_USER || role.getCode() == RoleCode.SELLER)) {
             return false;
         }
 
@@ -201,7 +201,8 @@ public class UserService {
             return;
         }
 
-        if (accessControlService.hasRole(RoleCode.ADMIN_MARKET) && roleCode == RoleCode.STORE_USER) {
+        if (accessControlService.hasRole(RoleCode.ADMIN_MARKET)
+                && (roleCode == RoleCode.STORE_USER || roleCode == RoleCode.SELLER)) {
             return;
         }
 
@@ -213,15 +214,7 @@ public class UserService {
             return request.marketIds() == null ? List.of() : request.marketIds();
         }
 
-        List<Long> requested = request.marketIds() == null || request.marketIds().isEmpty()
-                ? accessControlService.currentMarketIds()
-                : request.marketIds();
-
-        if (!new LinkedHashSet<>(accessControlService.currentMarketIds()).containsAll(requested)) {
-            throw new AccessDeniedException("You do not have permission to perform this action.");
-        }
-
-        return requested;
+        return accessControlService.currentMarketIds();
     }
 
     private List<Long> resolveManagedStoreIds(UserRequest request) {

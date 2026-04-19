@@ -13,7 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.colaborapp.closings.domain.DailyClosing;
+import com.colaborapp.closings.domain.DailyClosingCollaborator;
 import com.colaborapp.closings.domain.DailyClosingStore;
+import com.colaborapp.closings.repository.DailyClosingCollaboratorRepository;
 import com.colaborapp.closings.repository.DailyClosingRepository;
 import com.colaborapp.closings.repository.DailyClosingStoreRepository;
 import com.colaborapp.closings.web.dto.DailyClosingResponse;
@@ -33,6 +35,7 @@ public class DailyClosingService {
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(4);
 
     private final DailyClosingRepository dailyClosingRepository;
+    private final DailyClosingCollaboratorRepository dailyClosingCollaboratorRepository;
     private final DailyClosingStoreRepository dailyClosingStoreRepository;
     private final SaleStoreSummaryRepository saleStoreSummaryRepository;
     private final MarketRepository marketRepository;
@@ -45,6 +48,7 @@ public class DailyClosingService {
 
     public DailyClosingService(
             DailyClosingRepository dailyClosingRepository,
+            DailyClosingCollaboratorRepository dailyClosingCollaboratorRepository,
             DailyClosingStoreRepository dailyClosingStoreRepository,
             SaleStoreSummaryRepository saleStoreSummaryRepository,
             MarketRepository marketRepository,
@@ -55,6 +59,7 @@ public class DailyClosingService {
             CollaboratorClosingEmailService collaboratorClosingEmailService,
             @Value("${app.business-zone:America/Santiago}") String businessZone) {
         this.dailyClosingRepository = dailyClosingRepository;
+        this.dailyClosingCollaboratorRepository = dailyClosingCollaboratorRepository;
         this.dailyClosingStoreRepository = dailyClosingStoreRepository;
         this.saleStoreSummaryRepository = saleStoreSummaryRepository;
         this.marketRepository = marketRepository;
@@ -93,38 +98,28 @@ public class DailyClosingService {
         Instant startAt = closingDate.atStartOfDay(businessZone).toInstant();
         Instant endAt = closingDate.plusDays(1).atStartOfDay(businessZone).toInstant();
 
-        Object[] totals = saleStoreSummaryRepository.summarizeClosingTotals(
-                tenantId,
-                marketId,
-                SaleStatus.CONFIRMED,
-                startAt,
-                endAt);
-        List<Object[]> storeRows = saleStoreSummaryRepository.summarizeClosingStores(
-                tenantId,
-                marketId,
-                SaleStatus.CONFIRMED,
-                startAt,
-                endAt);
+        List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
+                collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
 
         DailyClosing closing = new DailyClosing();
         closing.setMarket(market);
         closing.setClosingDate(closingDate);
-        closing.setSaleCount(toLong(totals[0]));
-        closing.setTotalSalesAmount(toBigDecimal(totals[1]));
-        closing.setTotalCommissionAmount(toBigDecimal(totals[2]));
-        closing.setTotalNetAmount(toBigDecimal(totals[3]));
+        closing.setSaleCount(collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum());
+        closing.setTotalSalesAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()));
+        closing.setTotalCommissionAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()));
+        closing.setTotalNetAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()));
         closing.setClosedAt(Instant.now());
         closing.setClosedBy(closedBy);
         dailyClosingRepository.save(closing);
 
-        List<DailyClosingStore> stores = storeRows.stream()
-                .map(row -> toClosingStore(closing, row))
+        List<DailyClosingCollaborator> collaborators = collaboratorSummaries.stream()
+                .map(summary -> toCollaboratorRow(closing, summary))
                 .toList();
-        if (!stores.isEmpty()) {
-            dailyClosingStoreRepository.saveAll(stores);
+        if (!collaborators.isEmpty()) {
+            dailyClosingCollaboratorRepository.saveAll(collaborators);
         }
 
-        DailyClosingResponse response = toResponse(closing, stores);
+        DailyClosingResponse response = toResponse(closing, collaborators);
         try {
             dailyClosingEmailService.sendClosingSummary(market.getEmail(), response);
         } catch (Exception exception) {
@@ -134,33 +129,39 @@ public class DailyClosingService {
             collaboratorClosingEmailService.sendDailySummaries(
                     market.getName(),
                     closingDate,
-                    collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt));
+                    collaboratorSummaries);
         } catch (Exception exception) {
             log.warn("Daily collaborator closing emails could not be sent for market {} and date {}.", marketId, closingDate, exception);
         }
         return response;
     }
 
-    private DailyClosingStore toClosingStore(DailyClosing closing, Object[] row) {
-        Object[] values = unwrapRow(row);
-        DailyClosingStore store = new DailyClosingStore();
-        store.setDailyClosing(closing);
-        store.setStore(storeRepository.getReferenceById(toLong(values[0])));
-        store.setStoreNameSnapshot((String) values[1]);
-        store.setSaleCount(toLong(values[2]));
-        store.setTotalSalesAmount(toBigDecimal(values[3]));
-        store.setTotalCommissionAmount(toBigDecimal(values[4]));
-        store.setTotalNetAmount(toBigDecimal(values[5]));
-        store.setTotalItems(toLong(values[6]));
-        return store;
+    private DailyClosingCollaborator toCollaboratorRow(
+            DailyClosing closing,
+            CollaboratorSalesSummaryService.CollaboratorSummary summary) {
+        DailyClosingCollaborator collaborator = new DailyClosingCollaborator();
+        collaborator.setDailyClosing(closing);
+        collaborator.setCollaboratorUserId(summary.collaboratorUserId());
+        collaborator.setCollaboratorNameSnapshot(summary.collaboratorName());
+        collaborator.setCollaboratorEmailSnapshot(summary.collaboratorEmail());
+        collaborator.setSaleCount(summary.saleCount());
+        collaborator.setTotalItems(summary.totalItems());
+        collaborator.setTotalSalesAmount(summary.totalSalesAmount());
+        collaborator.setTotalCommissionAmount(summary.totalCommissionAmount());
+        collaborator.setTotalNetAmount(summary.totalNetAmount());
+        return collaborator;
     }
 
     private DailyClosingResponse toResponse(DailyClosing closing) {
-        List<DailyClosingStore> stores = dailyClosingStoreRepository.findByDailyClosingIdOrderByStoreNameSnapshotAsc(closing.getId());
-        return toResponse(closing, stores);
+        List<DailyClosingCollaborator> collaborators =
+                dailyClosingCollaboratorRepository.findByDailyClosingIdOrderByCollaboratorNameSnapshotAsc(closing.getId());
+        if (collaborators.isEmpty()) {
+            return rebuildLegacyClosingIfNeeded(closing);
+        }
+        return toResponse(closing, collaborators);
     }
 
-    private DailyClosingResponse toResponse(DailyClosing closing, List<DailyClosingStore> stores) {
+    private DailyClosingResponse toResponse(DailyClosing closing, List<DailyClosingCollaborator> collaborators) {
         return new DailyClosingResponse(
                 closing.getMarket().getId(),
                 closing.getMarket().getName(),
@@ -171,36 +172,61 @@ public class DailyClosingService {
                 closing.getTotalNetAmount(),
                 closing.getClosedAt(),
                 closing.getClosedBy(),
-                stores.stream()
-                        .map(store -> new DailyClosingStoreResponse(
-                                store.getStore().getId(),
-                                store.getStoreNameSnapshot(),
-                                store.getSaleCount(),
-                                store.getTotalSalesAmount(),
-                                store.getTotalCommissionAmount(),
-                                store.getTotalNetAmount(),
-                                store.getTotalItems()))
+                collaborators.stream()
+                        .map(collaborator -> new DailyClosingStoreResponse(
+                                collaborator.getCollaboratorUserId(),
+                                collaborator.getCollaboratorNameSnapshot(),
+                                collaborator.getSaleCount(),
+                                collaborator.getTotalSalesAmount(),
+                                collaborator.getTotalCommissionAmount(),
+                                collaborator.getTotalNetAmount(),
+                                collaborator.getTotalItems()))
                         .toList());
     }
 
-    private BigDecimal toBigDecimal(Object value) {
-        if (value == null) {
-            return ZERO;
+    private DailyClosingResponse rebuildLegacyClosingIfNeeded(DailyClosing closing) {
+        Instant startAt = closing.getClosingDate().atStartOfDay(businessZone).toInstant();
+        Instant endAt = closing.getClosingDate().plusDays(1).atStartOfDay(businessZone).toInstant();
+        List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
+                collaboratorSalesSummaryService.summarizeByMarketAndPeriod(closing.getMarket().getId(), startAt, endAt);
+        if (collaboratorSummaries.isEmpty()) {
+            List<DailyClosingStore> legacyStores = dailyClosingStoreRepository.findByDailyClosingIdOrderByStoreNameSnapshotAsc(closing.getId());
+            return new DailyClosingResponse(
+                    closing.getMarket().getId(),
+                    closing.getMarket().getName(),
+                    closing.getClosingDate(),
+                    closing.getSaleCount(),
+                    closing.getTotalSalesAmount(),
+                    closing.getTotalCommissionAmount(),
+                    closing.getTotalNetAmount(),
+                    closing.getClosedAt(),
+                    closing.getClosedBy(),
+                    legacyStores.stream()
+                            .map(store -> new DailyClosingStoreResponse(
+                                    store.getStore() == null ? null : store.getStore().getId(),
+                                    store.getStoreNameSnapshot(),
+                                    store.getSaleCount(),
+                                    store.getTotalSalesAmount(),
+                                    store.getTotalCommissionAmount(),
+                                    store.getTotalNetAmount(),
+                                    store.getTotalItems()))
+                            .toList());
         }
-        if (value instanceof BigDecimal bigDecimal) {
-            return bigDecimal;
-        }
-        if (value instanceof Number number) {
-            return new BigDecimal(number.toString()).setScale(4);
-        }
-        return (BigDecimal) value;
+
+        closing.setSaleCount(collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum());
+        closing.setTotalSalesAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()));
+        closing.setTotalCommissionAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()));
+        closing.setTotalNetAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()));
+        dailyClosingRepository.save(closing);
+
+        List<DailyClosingCollaborator> collaborators = collaboratorSummaries.stream()
+                .map(summary -> toCollaboratorRow(closing, summary))
+                .toList();
+        dailyClosingCollaboratorRepository.saveAll(collaborators);
+        return toResponse(closing, collaborators);
     }
 
-    private long toLong(Object value) {
-        return value == null ? 0L : ((Number) value).longValue();
-    }
-
-    private Object[] unwrapRow(Object[] row) {
-        return row.length == 1 && row[0] instanceof Object[] nested ? nested : row;
+    private BigDecimal sum(List<BigDecimal> values) {
+        return values.stream().reduce(ZERO, BigDecimal::add);
     }
 }

@@ -14,16 +14,6 @@ export function BrandMark({
         ? "h-20 w-20 rounded-[28px] text-2xl"
         : "h-14 w-14 rounded-[22px] text-base";
 
-  if (APP_BRANDING.logoSrc) {
-    return (
-      <img
-        src={APP_BRANDING.logoSrc}
-        alt={APP_BRANDING.logoAlt}
-        className={`${sizeClasses} object-contain ${className}`.trim()}
-      />
-    );
-  }
-
   return (
     <div
       className={[

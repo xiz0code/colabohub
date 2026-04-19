@@ -9,6 +9,7 @@ type ModalProps = PropsWithChildren<{
   maxWidthClassName?: string;
   closeOnOverlayClick?: boolean;
   closeOnEscape?: boolean;
+  bodyClassName?: string;
 }>;
 
 export function Modal({
@@ -21,6 +22,7 @@ export function Modal({
   maxWidthClassName = "max-w-2xl",
   closeOnOverlayClick = true,
   closeOnEscape = true,
+  bodyClassName,
 }: ModalProps) {
   useEffect(() => {
     if (!open || !closeOnEscape) {
@@ -44,7 +46,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(248,213,231,0.24),transparent_42%),rgba(74,58,103,0.24)] px-4 py-8 backdrop-blur-md"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(248,213,231,0.24),transparent_42%),rgba(74,58,103,0.24)] px-4 py-4 sm:py-8 backdrop-blur-md"
       onMouseDown={() => {
         if (closeOnOverlayClick) {
           onClose();
@@ -52,7 +54,7 @@ export function Modal({
       }}
     >
       <div
-        className={`w-full ${maxWidthClassName} overflow-hidden rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,248,252,0.97))] shadow-[0_40px_90px_rgba(112,89,150,0.2)]`}
+        className={`my-auto flex w-full ${maxWidthClassName} max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,248,252,0.97))] shadow-[0_40px_90px_rgba(112,89,150,0.2)]`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 border-b border-border/60 bg-[linear-gradient(135deg,rgba(255,243,248,0.92),rgba(244,239,255,0.9))] px-6 py-5">
@@ -68,7 +70,7 @@ export function Modal({
             Cerrar
           </button>
         </div>
-        <div className="px-6 py-5">{children}</div>
+        <div className={["overflow-y-auto px-6 py-5", bodyClassName].filter(Boolean).join(" ")}>{children}</div>
         {footer ? <div className="border-t border-border/60 bg-background/70 px-6 py-4">{footer}</div> : null}
       </div>
     </div>

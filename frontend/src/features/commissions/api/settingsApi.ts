@@ -22,6 +22,7 @@ export type MarketFinancialSettings = {
   effectiveCommissionPercentageValue: number;
   globalPromotionEnabled: boolean;
   globalPromotionPercentage: number | null;
+  lowStockAlertThreshold: number;
 };
 
 export function getGlobalFinancialSettings() {
@@ -68,8 +69,10 @@ export function updateMarketCommissionSettings(
   overrideEnabled: boolean,
   commissionUfValue: number,
   commissionPercentageValue: number,
+  useDynamicFixedCommission: boolean,
   globalPromotionEnabled: boolean,
   globalPromotionPercentage: number | null,
+  lowStockAlertThreshold: number,
 ) {
   return apiFetch<MarketFinancialSettings>(`/api/settings/markets/${marketId}/commissions`, {
     method: "PATCH",
@@ -77,8 +80,10 @@ export function updateMarketCommissionSettings(
       overrideEnabled,
       commissionUfValue,
       commissionPercentageValue,
+      useDynamicFixedCommission,
       globalPromotionEnabled,
       globalPromotionPercentage,
+      lowStockAlertThreshold,
     }),
   });
 }

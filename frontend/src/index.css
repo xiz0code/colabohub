@@ -94,7 +94,7 @@
   }
 
   .soft-table {
-    @apply overflow-hidden rounded-[24px] border border-white bg-white shadow-[0_14px_32px_rgba(179,160,210,0.09)];
+    @apply overflow-x-auto overflow-y-hidden rounded-[24px] border border-white bg-white shadow-[0_14px_32px_rgba(179,160,210,0.09)];
   }
 
   .soft-table table {

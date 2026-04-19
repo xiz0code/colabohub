@@ -31,6 +31,7 @@ import com.colaborapp.inventory.domain.StockMovementType;
 import com.colaborapp.inventory.repository.StockMovementRepository;
 import com.colaborapp.markets.domain.Market;
 import com.colaborapp.markets.repository.MarketRepository;
+import com.colaborapp.pickups.repository.PickupRepository;
 import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
@@ -79,6 +80,9 @@ class PosSaleServiceTest {
 
     @Mock
     private MarketRepository marketRepository;
+
+    @Mock
+    private PickupRepository pickupRepository;
 
     @Mock
     private CurrentTenantProvider currentTenantProvider;
@@ -135,6 +139,7 @@ class PosSaleServiceTest {
         Mockito.lenient().when(authenticatedUserService.getCurrentUserSnapshot()).thenReturn(currentAdminMarketUser());
         Mockito.lenient().when(commissionSettingsService.getEffectiveCommissionConfig(marketA.getId())).thenReturn(defaultCommissionConfig());
         Mockito.lenient().when(commissionSettingsService.getEffectiveCommissionConfig(marketB.getId())).thenReturn(defaultCommissionConfig());
+        Mockito.lenient().when(pickupRepository.findAllByLinkedSaleId(any())).thenReturn(List.of());
     }
 
     @Test
@@ -184,11 +189,33 @@ class PosSaleServiceTest {
     void storeUserCannotCreateSale() {
         org.mockito.Mockito.doThrow(new AccessDeniedException("You do not have permission to perform this action."))
                 .when(accessControlService)
-                .requireAnyRole(RoleCode.ADMIN_MARKET);
+                .requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
 
         assertThatThrownBy(() -> posSaleService.createSale(new CreatePosSaleRequest(PaymentMethod.CASH, null)))
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessage("You do not have permission to perform this action.");
+    }
+
+    @Test
+    void sellerCanCreateSaleForAssignedMarket() {
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(authenticatedUserService.getCurrentUserSnapshot()).thenReturn(currentSellerUser());
+        when(saleRepository.findFirstByTenantIdAndMarketIdAndStatusOrderByOpenedAtDesc(1L, marketA.getId(), SaleStatus.OPEN))
+                .thenReturn(Optional.empty());
+        when(saleRepository.findFirstByTenantIdAndMarketIsNullAndStatusOrderByOpenedAtDesc(1L, SaleStatus.OPEN))
+                .thenReturn(Optional.empty());
+        when(marketRepository.findByIdAndTenantId(marketA.getId(), 1L)).thenReturn(Optional.of(marketA));
+        when(saleNumberGenerator.next()).thenReturn("S-2026-00000077");
+        when(saleRepository.save(any(Sale.class))).thenAnswer(invocation -> {
+            Sale sale = invocation.getArgument(0);
+            sale.setId(77L);
+            return sale;
+        });
+
+        PosSaleResponse response = posSaleService.createSale(new CreatePosSaleRequest(PaymentMethod.CASH, null));
+
+        assertThat(response.id()).isEqualTo(77L);
+        assertThat(response.marketId()).isEqualTo(marketA.getId());
     }
 
     @Test
@@ -280,6 +307,41 @@ class PosSaleServiceTest {
         assertThat(saved.getProductBarcodeSnapshot()).isEqualTo("7500000000101");
         assertThat(saved.getStore()).isEqualTo(storeAna);
         assertThat(response.items()).hasSize(1);
+    }
+
+    @Test
+    void shouldRejectAddingProductWithoutStock() {
+        productAna.setStock(0);
+        Sale sale = openSale(1L);
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
+        when(productRepository.findByIdAndTenantIdWithStore(productAna.getId(), 1L)).thenReturn(Optional.of(productAna));
+        when(saleItemRepository.findBySaleIdAndProductId(1L, productAna.getId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> posSaleService.addItem(1L, new PosSaleItemRequest(productAna.getId(), 1)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("No puedes agregar Aro Flor porque no tiene stock disponible.");
+
+        verify(saleItemRepository, never()).save(any(SaleItem.class));
+    }
+
+    @Test
+    void shouldRejectAddingMoreUnitsThanAvailableStock() {
+        productAna.setStock(1);
+        Sale sale = openSale(1L);
+        SaleItem existingItem = saleItem(sale, productAna, 1, "12000.00");
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
+        when(productRepository.findByIdAndTenantIdWithStore(productAna.getId(), 1L)).thenReturn(Optional.of(productAna));
+        when(saleItemRepository.findBySaleIdAndProductId(1L, productAna.getId())).thenReturn(Optional.of(existingItem));
+
+        assertThatThrownBy(() -> posSaleService.addItem(1L, new PosSaleItemRequest(productAna.getId(), 1)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("No puedes vender 2 unidad(es) de Aro Flor. Stock disponible: 1.");
+
+        verify(saleItemRepository, never()).save(any(SaleItem.class));
     }
 
     @Test
@@ -556,6 +618,7 @@ class PosSaleServiceTest {
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
         when(saleItemRepository.findByIdAndSaleId(50L, 1L)).thenReturn(Optional.of(item));
+        when(productRepository.findByIdAndTenantIdWithStore(productAna.getId(), 1L)).thenReturn(Optional.of(productAna));
         when(saleItemRepository.findAllBySaleIdWithDetails(1L)).thenReturn(List.of(item));
         when(posPricingService.calculateSalePricing(any(), eq(PaymentMethod.CASH), eq(null)))
                 .thenReturn(new PosPricingService.RecalculationResult(
@@ -572,6 +635,24 @@ class PosSaleServiceTest {
 
         assertThat(item.getQuantity()).isEqualTo(3);
         assertThat(response.totalAmount()).isEqualByComparingTo("36000.00");
+    }
+
+    @Test
+    void shouldRejectUpdatingItemBeyondAvailableStock() {
+        productAna.setStock(1);
+        Sale sale = openSale(1L);
+        SaleItem item = saleItem(sale, productAna, 1, "12000.00");
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
+        when(saleItemRepository.findByIdAndSaleId(50L, 1L)).thenReturn(Optional.of(item));
+        when(productRepository.findByIdAndTenantIdWithStore(productAna.getId(), 1L)).thenReturn(Optional.of(productAna));
+
+        assertThatThrownBy(() -> posSaleService.updateItem(1L, 50L, new PosSaleItemUpdateRequest(2)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("No puedes vender 2 unidad(es) de Aro Flor. Stock disponible: 1.");
+
+        verify(saleItemRepository, never()).save(any(SaleItem.class));
     }
 
     @Test
@@ -736,6 +817,23 @@ class PosSaleServiceTest {
         return new AuthenticatedUserService.CurrentAuthenticatedUser(
                 user,
                 List.of(RoleCode.ADMIN_MARKET.name()),
+                true,
+                marketA.getId(),
+                marketA.getName(),
+                List.of(marketA.getId()),
+                List.of(),
+                List.of(marketA.getName()));
+    }
+
+    private AuthenticatedUserService.CurrentAuthenticatedUser currentSellerUser() {
+        User user = new User();
+        user.setId(501L);
+        user.setEmail("seller@colaborapp.cl");
+        user.setFullName("Vendedor");
+        user.setActive(true);
+        return new AuthenticatedUserService.CurrentAuthenticatedUser(
+                user,
+                List.of(RoleCode.SELLER.name()),
                 true,
                 marketA.getId(),
                 marketA.getName(),

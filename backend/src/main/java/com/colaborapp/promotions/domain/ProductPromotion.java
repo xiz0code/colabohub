@@ -56,6 +56,12 @@ public class ProductPromotion extends BaseEntity {
     private BigDecimal percentageDiscount;
 
     @Column(nullable = false)
+    private boolean appliesToCash = false;
+
+    @Column(nullable = false)
+    private boolean appliesToDebit = false;
+
+    @Column(nullable = false)
     private boolean active = true;
 
     @Column

@@ -60,7 +60,8 @@ describe("InventoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText("No hay productos disponibles")).toBeInTheDocument();
     });
-    expect(screen.getByRole("heading", { name: "Modo lectura" })).toBeInTheDocument();
+    expect(screen.getByText("Modo lectura")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Catalogo propio" })).toBeInTheDocument();
     expect(screen.queryByText("Aplicar ajuste")).not.toBeInTheDocument();
   });
 });

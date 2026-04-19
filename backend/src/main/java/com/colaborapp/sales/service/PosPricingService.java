@@ -14,6 +14,7 @@ import java.util.Objects;
 import org.springframework.stereotype.Service;
 
 import com.colaborapp.promotions.domain.ProductPromotion;
+import com.colaborapp.promotions.domain.ProductPromotionGroup;
 import com.colaborapp.promotions.domain.PromotionType;
 import com.colaborapp.promotions.repository.ProductPromotionRepository;
 import com.colaborapp.sales.domain.PaymentMethod;
@@ -46,16 +47,34 @@ public class PosPricingService {
             return RecalculationResult.empty();
         }
 
-        Map<Long, List<ProductPromotion>> promotionsByProductId = productPromotionRepository
-                .findActiveByProductIds(items.stream().map(item -> item.getProduct().getId()).distinct().toList(), Instant.now())
-                .stream()
-                .collect(java.util.stream.Collectors.groupingBy(pp -> pp.getProduct().getId()));
+        List<Long> productIds = items.stream()
+                .map(SaleItem::getProduct)
+                .filter(Objects::nonNull)
+                .map(product -> product.getId())
+                .distinct()
+                .toList();
+        Map<Long, List<ProductPromotion>> promotionsByProductId = productIds.isEmpty()
+                ? Map.of()
+                : productPromotionRepository
+                        .findActiveByProductIds(productIds, Instant.now())
+                        .stream()
+                        .collect(java.util.stream.Collectors.groupingBy(pp -> pp.getProduct().getId()));
+        Map<Long, ProductPromotion> quantityPromotionByGroupId = resolveQuantityPromotionsByGroup(items, promotionsByProductId);
 
         List<SaleItem> recalculatedItems = new ArrayList<>(items.size());
         for (SaleItem item : items) {
-            calculateItemPricing(item, promotionsByProductId.getOrDefault(item.getProduct().getId(), List.of()));
+            Long productId = item.getProduct() != null ? item.getProduct().getId() : null;
+            ProductPromotionGroup group = item.getProduct() != null ? item.getProduct().getPromotionGroup() : null;
+            List<ProductPromotion> itemPromotions = productId != null ? promotionsByProductId.getOrDefault(productId, List.of()) : List.of();
+            if (group != null && quantityPromotionByGroupId.containsKey(group.getId())) {
+                itemPromotions = itemPromotions.stream()
+                        .filter(promotion -> promotion.getType() != PromotionType.QUANTITY_BLOCK)
+                        .toList();
+            }
+            calculateItemPricing(item, itemPromotions, paymentMethod);
             recalculatedItems.add(item);
         }
+        applyGroupedQuantityPromotions(recalculatedItems, quantityPromotionByGroupId);
 
         List<SaleStoreSummary> summaries = calculateStoreSummaries(recalculatedItems, paymentMethod, ufValue);
         BigDecimal subtotalAmount = recalculatedItems.stream()
@@ -83,9 +102,144 @@ public class PosPricingService {
                 summaries);
     }
 
-    public void calculateItemPricing(SaleItem item, List<ProductPromotion> promotions) {
-        PriceComputation computation = computeBestPrice(item, promotions);
+    public void calculateItemPricing(SaleItem item, List<ProductPromotion> promotions, PaymentMethod paymentMethod) {
+        PriceComputation computation = computeBestPrice(item, promotions, paymentMethod);
         applyPrice(item, computation);
+    }
+
+    private Map<Long, ProductPromotion> resolveQuantityPromotionsByGroup(
+            List<SaleItem> items,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        Map<Long, List<ProductPromotion>> promotionsByGroupId = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.isManualEntry() || item.getProduct() == null || item.getProduct().getPromotionGroup() == null) {
+                continue;
+            }
+            Long productId = item.getProduct().getId();
+            Long groupId = item.getProduct().getPromotionGroup().getId();
+            promotionsByProductId.getOrDefault(productId, List.of()).stream()
+                    .filter(promotion -> promotion.getType() == PromotionType.QUANTITY_BLOCK)
+                    .forEach(promotion -> promotionsByGroupId.computeIfAbsent(groupId, ignored -> new ArrayList<>()).add(promotion));
+        }
+
+        Map<Long, ProductPromotion> result = new HashMap<>();
+        promotionsByGroupId.forEach((groupId, promotions) -> promotions.stream()
+                .distinct()
+                .max(Comparator.comparing(ProductPromotion::getBlockQuantity)
+                        .thenComparing(ProductPromotion::getBlockPrice, Comparator.reverseOrder()))
+                .ifPresent(promotion -> result.put(groupId, promotion)));
+        return result;
+    }
+
+    private void applyGroupedQuantityPromotions(List<SaleItem> items, Map<Long, ProductPromotion> quantityPromotionByGroupId) {
+        if (quantityPromotionByGroupId.isEmpty()) {
+            return;
+        }
+
+        Map<Long, List<SaleItem>> itemsByGroup = items.stream()
+                .filter(item -> item.getProduct() != null && item.getProduct().getPromotionGroup() != null)
+                .collect(java.util.stream.Collectors.groupingBy(item -> item.getProduct().getPromotionGroup().getId()));
+
+        for (Map.Entry<Long, List<SaleItem>> entry : itemsByGroup.entrySet()) {
+            ProductPromotion promotion = quantityPromotionByGroupId.get(entry.getKey());
+            if (promotion == null) {
+                continue;
+            }
+            applyGroupedQuantityPromotion(entry.getValue(), promotion);
+        }
+    }
+
+    private void applyGroupedQuantityPromotion(List<SaleItem> groupItems, ProductPromotion promotion) {
+        List<SaleItem> eligibleItems = groupItems.stream()
+                .filter(item -> item.getProduct() != null)
+                .filter(item -> item.getPromotionDiscountAmount() == null || item.getPromotionDiscountAmount().compareTo(ZERO) == 0)
+                .filter(item -> item.getBaseUnitPrice() != null)
+                .toList();
+        if (eligibleItems.isEmpty()) {
+            return;
+        }
+
+        BigDecimal unitPrice = eligibleItems.getFirst().getBaseUnitPrice();
+        boolean sameUnitPrice = eligibleItems.stream().allMatch(item -> item.getBaseUnitPrice().compareTo(unitPrice) == 0);
+        if (!sameUnitPrice) {
+            return;
+        }
+
+        int blockQuantity = promotion.getBlockQuantity();
+        int totalQuantity = eligibleItems.stream().mapToInt(SaleItem::getQuantity).sum();
+        if (blockQuantity <= 0 || totalQuantity < blockQuantity) {
+            return;
+        }
+
+        BigDecimal baseSubtotal = unitPrice.multiply(BigDecimal.valueOf(totalQuantity));
+        BigDecimal promotionalSubtotal = calculateGroupedPromotionalSubtotal(eligibleItems, promotion, unitPrice);
+        BigDecimal totalDiscount = scale(baseSubtotal.subtract(promotionalSubtotal));
+        if (totalDiscount.compareTo(ZERO) <= 0) {
+            return;
+        }
+
+        Map<SaleItem, BigDecimal> subtotalByItem = distributeGroupedPromotionalSubtotal(eligibleItems, promotion, unitPrice);
+        for (SaleItem item : eligibleItems) {
+            BigDecimal lineSubtotal = subtotalByItem.getOrDefault(item, scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()))));
+            BigDecimal lineBaseSubtotal = scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+
+            item.setLineBaseSubtotal(lineBaseSubtotal);
+            item.setPromotionDiscountAmount(scale(lineBaseSubtotal.subtract(lineSubtotal)));
+            item.setSubtotal(scale(lineSubtotal));
+            item.setPricingType(SaleItemPricingType.PROMOTION);
+            item.setAppliedPromotionId(promotion.getId());
+            item.setAppliedPromotionName(promotion.getName() + " (grupo " + item.getProduct().getPromotionGroup().getName() + ")");
+        }
+    }
+
+    private BigDecimal calculateGroupedPromotionalSubtotal(List<SaleItem> eligibleItems, ProductPromotion promotion, BigDecimal unitPrice) {
+        return distributeGroupedPromotionalSubtotal(eligibleItems, promotion, unitPrice).values().stream()
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(MONEY_SCALE, HALF_UP);
+    }
+
+    private Map<SaleItem, BigDecimal> distributeGroupedPromotionalSubtotal(
+            List<SaleItem> eligibleItems,
+            ProductPromotion promotion,
+            BigDecimal unitPrice) {
+        int blockQuantity = promotion.getBlockQuantity();
+        BigDecimal blockPrice = scale(promotion.getBlockPrice());
+        Map<SaleItem, BigDecimal> subtotalByItem = new HashMap<>();
+        Map<SaleItem, Integer> remainingUnitsByItem = new HashMap<>();
+
+        for (SaleItem item : eligibleItems) {
+            int fullBlocks = item.getQuantity() / blockQuantity;
+            int remainingUnits = item.getQuantity() % blockQuantity;
+            subtotalByItem.put(item, blockPrice.multiply(BigDecimal.valueOf(fullBlocks)));
+            remainingUnitsByItem.put(item, remainingUnits);
+        }
+
+        int remainingQuantity = remainingUnitsByItem.values().stream().mapToInt(Integer::intValue).sum();
+        if (remainingQuantity == 0) {
+            return subtotalByItem;
+        }
+
+        int crossBlocks = remainingQuantity / blockQuantity;
+        int regularUnits = remainingQuantity % blockQuantity;
+        BigDecimal remainingBaseSubtotal = unitPrice.multiply(BigDecimal.valueOf(remainingQuantity));
+        BigDecimal remainingPromotionalSubtotal = scale(blockPrice.multiply(BigDecimal.valueOf(crossBlocks))
+                .add(unitPrice.multiply(BigDecimal.valueOf(regularUnits))));
+        BigDecimal undistributedSubtotal = remainingPromotionalSubtotal;
+
+        List<SaleItem> itemsWithRemainingUnits = eligibleItems.stream()
+                .filter(item -> remainingUnitsByItem.getOrDefault(item, 0) > 0)
+                .toList();
+        for (int index = 0; index < itemsWithRemainingUnits.size(); index++) {
+            SaleItem item = itemsWithRemainingUnits.get(index);
+            BigDecimal itemBaseSubtotal = unitPrice.multiply(BigDecimal.valueOf(remainingUnitsByItem.get(item)));
+            BigDecimal itemSubtotal = index == itemsWithRemainingUnits.size() - 1
+                    ? undistributedSubtotal
+                    : scale(itemBaseSubtotal.divide(remainingBaseSubtotal, 8, HALF_UP).multiply(remainingPromotionalSubtotal));
+            undistributedSubtotal = undistributedSubtotal.subtract(itemSubtotal);
+            subtotalByItem.merge(item, itemSubtotal, BigDecimal::add);
+        }
+
+        return subtotalByItem;
     }
 
     public List<SaleStoreSummary> calculateStoreSummaries(
@@ -95,7 +249,21 @@ public class PosPricingService {
         return computeStoreSummaries(items, paymentMethod, ufValue);
     }
 
-    private PriceComputation computeBestPrice(SaleItem item, List<ProductPromotion> promotions) {
+    private PriceComputation computeBestPrice(SaleItem item, List<ProductPromotion> promotions, PaymentMethod paymentMethod) {
+        if (item.isManualEntry() || item.getProduct() == null) {
+            BigDecimal unitPrice = scale(item.getBaseUnitPrice());
+            BigDecimal baseSubtotal = unitPrice.multiply(BigDecimal.valueOf(item.getQuantity()));
+            return new PriceComputation(
+                    unitPrice,
+                    scale(baseSubtotal),
+                    ZERO,
+                    scale(baseSubtotal),
+                    Map.of(),
+                    item.getQuantity(),
+                    null,
+                    null);
+        }
+
         BigDecimal unitPrice = scale(item.getProduct().getSalePrice());
         int quantity = item.getQuantity();
         BigDecimal globalPromotionPercentage = item.getProduct().getStore().getMarket().isGlobalPromotionEnabled()
@@ -120,7 +288,8 @@ public class PosPricingService {
         }
 
         ProductPromotion percentagePromotion = promotions.stream()
-                .filter(promotion -> promotion.getType() == PromotionType.PERCENTAGE_DISCOUNT)
+                .filter(promotion -> promotion.getType() == PromotionType.PERCENTAGE_DISCOUNT
+                        || (promotion.getType() == PromotionType.PAYMENT_METHOD_DISCOUNT && appliesToPaymentMethod(promotion, paymentMethod)))
                 .filter(promotion -> promotion.getPercentageDiscount() != null)
                 .max(Comparator.comparing(ProductPromotion::getPercentageDiscount))
                 .orElse(null);
@@ -197,7 +366,27 @@ public class PosPricingService {
                 null);
     }
 
+    private boolean appliesToPaymentMethod(ProductPromotion promotion, PaymentMethod paymentMethod) {
+        if (paymentMethod == PaymentMethod.CASH) {
+            return promotion.isAppliesToCash();
+        }
+        if (paymentMethod == PaymentMethod.DEBITO) {
+            return promotion.isAppliesToDebit();
+        }
+        return false;
+    }
+
     private void applyPrice(SaleItem item, PriceComputation computation) {
+        if (item.isManualEntry() || item.getProduct() == null) {
+            item.setBaseUnitPrice(computation.baseUnitPrice());
+            item.setLineBaseSubtotal(computation.baseSubtotal());
+            item.setPromotionDiscountAmount(computation.discountAmount());
+            item.setSubtotal(computation.finalSubtotal());
+            item.setPricingType(SaleItemPricingType.NORMAL);
+            item.setAppliedPromotionId(null);
+            return;
+        }
+
         item.setProductNameSnapshot(item.getProduct().getName());
         item.setProductSkuSnapshot(item.getProduct().getSku());
         item.setProductBarcodeSnapshot(item.getProduct().getBarcode());
@@ -264,7 +453,6 @@ public class PosPricingService {
                         .toList());
         boolean useDynamicFixedCommission = commissionSettingsService.useDynamicFixedCommission();
         BigDecimal safeUfValue = ufValue == null ? BigDecimal.ZERO : ufValue;
-        int totalLineCount = items.size();
 
         Map<SaleItem, BigDecimal> fixedCommissionByItem = new HashMap<>();
         if (appliesDebitCommissions(paymentMethod)) {
@@ -286,21 +474,17 @@ public class PosPricingService {
                     }
                 }
             } else {
-                for (List<SaleItem> storeItems : itemsByStore.values()) {
-                    Store store = storeItems.getFirst().getStore();
-                    CommissionSettingsService.EffectiveCommissionConfig commissionConfig = commissionsByMarket.getOrDefault(
-                            store.getMarket().getId(),
-                            new CommissionSettingsService.EffectiveCommissionConfig(
-                                    CommissionSettingsService.DEFAULT_COMMISSION_UF,
-                                    CommissionSettingsService.DEFAULT_COMMISSION_PERCENTAGE));
-                    BigDecimal fixedCommission = totalLineCount == 0
-                            ? ZERO_CLP
-                            : roundClp(
-                                    safeUfValue.multiply(commissionConfig.commissionUfValue())
-                                            .divide(BigDecimal.valueOf(totalLineCount), MONEY_SCALE, HALF_UP));
-                    for (SaleItem storeItem : storeItems) {
-                        fixedCommissionByItem.put(storeItem, fixedCommission);
-                    }
+                SaleItem firstItem = items.getFirst();
+                Store firstStore = firstItem.getStore();
+                CommissionSettingsService.EffectiveCommissionConfig commissionConfig = commissionsByMarket.getOrDefault(
+                        firstStore.getMarket().getId(),
+                        new CommissionSettingsService.EffectiveCommissionConfig(
+                                CommissionSettingsService.DEFAULT_COMMISSION_UF,
+                                CommissionSettingsService.DEFAULT_COMMISSION_PERCENTAGE));
+                BigDecimal totalFixedCommission = roundClp(safeUfValue.multiply(commissionConfig.commissionUfValue()));
+                List<BigDecimal> distributedCommissions = distributeClpAmount(totalFixedCommission, items.size());
+                for (int index = 0; index < items.size(); index++) {
+                    fixedCommissionByItem.put(items.get(index), distributedCommissions.get(index));
                 }
             }
         }

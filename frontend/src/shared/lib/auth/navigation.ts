@@ -10,6 +10,7 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/tiendas", label: "Espacios" },
     { to: "/colaboradores", label: "Tiendas" },
+    { to: "/vendedores", label: "Vendedores" },
     { to: "/reports/collaborators", label: "Reportes" },
     { to: "/closings", label: "Cierres" },
     { to: "/commissions", label: "Configuracion" },
@@ -17,15 +18,24 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
   ADMIN_MARKET: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/colaboradores", label: "Tiendas" },
+    { to: "/vendedores", label: "Vendedores" },
     { to: "/sales", label: "Ventas" },
+    { to: "/pickups", label: "Retiros" },
     { to: "/products", label: "Stock" },
+    { to: "/reports/collaborators", label: "Reportes" },
     { to: "/closings", label: "Cierres" },
     { to: "/commissions", label: "Configuracion" },
+  ],
+  SELLER: [
+    { to: "/sales", label: "Ventas" },
+    { to: "/pickups", label: "Retiros" },
+    { to: "/products", label: "Stock" },
   ],
   STORE_USER: [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/sales/today", label: "Mis ventas" },
-    { to: "/inventory", label: "Mi stock" },
+    { to: "/pickups", label: "Retiros" },
+    { to: "/products", label: "Mi stock" },
   ],
   COLLABORATOR: [
     { to: "/dashboard", label: "Dashboard" },

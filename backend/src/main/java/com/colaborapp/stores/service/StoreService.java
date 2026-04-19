@@ -1,5 +1,9 @@
 package com.colaborapp.stores.service;
 
+import java.util.Locale;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
@@ -27,6 +31,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class StoreService {
 
+    private static final Logger log = LoggerFactory.getLogger(StoreService.class);
+
     private final StoreRepository storeRepository;
     private final MarketService marketService;
     private final CurrentTenantProvider currentTenantProvider;
@@ -40,12 +46,16 @@ public class StoreService {
                 normalizePage(query.page()),
                 normalizeSize(query.size()),
                 Sort.by(Sort.Direction.ASC, "name"));
+        String normalizedQuery = normalizeSearchPattern(query.query());
+        if (normalizedQuery != null) {
+            log.info("Store search param type: {}", normalizedQuery.getClass().getName());
+        }
 
         if (accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)) {
             return PageResponse.from(storeRepository.search(
                             tenantId,
                             query.status(),
-                            normalizeQuery(query.query()),
+                            normalizedQuery,
                             pageable)
                     .map(this::toResponse));
         }
@@ -59,7 +69,7 @@ public class StoreService {
                         tenantId,
                         marketIds,
                         query.status(),
-                        normalizeQuery(query.query()),
+                        normalizedQuery,
                         pageable)
                 .map(this::toResponse));
     }
@@ -128,11 +138,11 @@ public class StoreService {
         }
     }
 
-    private String normalizeQuery(String query) {
+    private String normalizeSearchPattern(String query) {
         if (query == null || query.isBlank()) {
             return null;
         }
-        return query.trim();
+        return "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
     }
 
     private int normalizePage(int page) {

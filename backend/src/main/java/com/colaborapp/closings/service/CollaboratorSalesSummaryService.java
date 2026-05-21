@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,7 +29,6 @@ public class CollaboratorSalesSummaryService {
 
     private static final BigDecimal IVA_DIVISOR = new BigDecimal("1.19");
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(4);
-
     private final SaleItemRepository saleItemRepository;
     private final UserRepository userRepository;
     private final CurrentTenantProvider currentTenantProvider;
@@ -56,18 +56,7 @@ public class CollaboratorSalesSummaryService {
                 endAt);
         List<CollaboratorSummary> summaries = summarize(items);
         CollaboratorSummary summary = summaries.isEmpty() ? CollaboratorSummary.empty(collaboratorUserId) : summaries.getFirst();
-        List<CollaboratorSaleEntry> entries = items.stream()
-                .map(item -> new CollaboratorSaleEntry(
-                        item.getSale().getId(),
-                        item.getSale().getSaleNumber(),
-                        item.getSale().getConfirmedAt(),
-                        item.getProductNameSnapshot(),
-                        item.getQuantity(),
-                        item.getSubtotal(),
-                        item.getTotalCommissionAmount(),
-                        item.getNetAmount()))
-                .toList();
-        return new CollaboratorReportData(summary, entries);
+        return new CollaboratorReportData(summary, summary.saleEntries());
     }
 
     private List<CollaboratorSummary> summarize(List<SaleItem> items) {
@@ -112,6 +101,22 @@ public class CollaboratorSalesSummaryService {
                 current.totalNetAmount = current.totalNetAmount.add(item.getNetAmount());
                 return current;
             });
+            aggregate.saleEntries.add(new CollaboratorSaleEntry(
+                    item.getSale().getId(),
+                    item.getSale().getSaleNumber(),
+                    item.getSale().getConfirmedAt(),
+                    item.getSale().getPaymentMethod() != null ? item.getSale().getPaymentMethod().name() : null,
+                    item.getProductNameSnapshot(),
+                    item.getQuantity(),
+                    item.getBaseUnitPrice(),
+                    item.getSale().getUfValue(),
+                    item.getSale().getCommissionUfValue(),
+                    item.getSubtotal(),
+                    item.getCommission1Amount(),
+                    item.getCommission2Amount(),
+                    item.getCommissionIvaAmount(),
+                    item.getTotalCommissionAmount(),
+                    item.getNetAmount()));
         }
 
         return aggregates.values().stream()
@@ -151,7 +156,8 @@ public class CollaboratorSalesSummaryService {
             BigDecimal totalNetAmount,
             BigDecimal totalIvaAmount,
             BigDecimal ivaToPayAmount,
-            List<CollaboratorProductSummary> products) {
+            List<CollaboratorProductSummary> products,
+            List<CollaboratorSaleEntry> saleEntries) {
 
         static CollaboratorSummary empty(Long collaboratorUserId) {
             return new CollaboratorSummary(
@@ -166,6 +172,7 @@ public class CollaboratorSalesSummaryService {
                     ZERO,
                     ZERO,
                     ZERO,
+                    List.of(),
                     List.of());
         }
     }
@@ -183,9 +190,16 @@ public class CollaboratorSalesSummaryService {
             Long saleId,
             String saleNumber,
             Instant confirmedAt,
+            String paymentMethod,
             String productName,
             int quantity,
+            BigDecimal unitPrice,
+            BigDecimal ufValue,
+            BigDecimal commissionUfValue,
             BigDecimal totalAmount,
+            BigDecimal fixedCommissionAmount,
+            BigDecimal variableCommissionAmount,
+            BigDecimal commissionIvaAmount,
             BigDecimal commissionAmount,
             BigDecimal netAmount) {
     }
@@ -208,6 +222,7 @@ public class CollaboratorSalesSummaryService {
         private BigDecimal totalIvaAmount = ZERO;
         private BigDecimal ivaToPayAmount = ZERO;
         private final Map<String, MutableProductSummary> productSummaries = new LinkedHashMap<>();
+        private final List<CollaboratorSaleEntry> saleEntries = new ArrayList<>();
 
         private MutableCollaboratorSummary(Long collaboratorUserId, String collaboratorName, String collaboratorEmail, boolean factura) {
             this.collaboratorUserId = collaboratorUserId;
@@ -231,6 +246,11 @@ public class CollaboratorSalesSummaryService {
                     factura ? ZERO : ivaToPayAmount,
                     productSummaries.values().stream()
                             .map(MutableProductSummary::toSummary)
+                            .toList(),
+                    saleEntries.stream()
+                            .sorted(Comparator.comparing(
+                                    CollaboratorSaleEntry::confirmedAt,
+                                    Comparator.nullsLast(Comparator.naturalOrder())))
                             .toList());
         }
     }

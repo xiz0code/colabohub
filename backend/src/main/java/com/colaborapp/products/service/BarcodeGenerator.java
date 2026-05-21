@@ -1,7 +1,5 @@
 package com.colaborapp.products.service;
 
-import java.security.SecureRandom;
-
 import org.springframework.stereotype.Component;
 
 import com.colaborapp.products.repository.ProductRepository;
@@ -11,36 +9,24 @@ import lombok.RequiredArgsConstructor;
 @Component
 @RequiredArgsConstructor
 public class BarcodeGenerator {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final long MAX_SHORT_BARCODE = 9_999_999L;
 
     private final ProductRepository productRepository;
 
     public String generateUniqueBarcode() {
-        String barcode;
-        do {
-            barcode = generateCandidate();
-        } while (productRepository.existsByBarcode(barcode));
+        while (true) {
+            Long nextValue = productRepository.nextShortBarcodeSequenceValue();
+            if (nextValue == null || nextValue <= 0) {
+                throw new IllegalStateException("No pudimos reservar un codigo de producto.");
+            }
+            if (nextValue > MAX_SHORT_BARCODE) {
+                throw new IllegalStateException("Se agotaron los codigos cortos disponibles para productos.");
+            }
 
-        return barcode;
-    }
-
-    private String generateCandidate() {
-        StringBuilder body = new StringBuilder("750");
-        while (body.length() < 12) {
-            body.append(RANDOM.nextInt(10));
+            String candidate = String.format("%07d", nextValue);
+            if (!productRepository.existsByShortBarcode(candidate)) {
+                return candidate;
+            }
         }
-
-        int checksum = calculateEan13Checksum(body.toString());
-        return body.append(checksum).toString();
-    }
-
-    private int calculateEan13Checksum(String body) {
-        int sum = 0;
-        for (int index = 0; index < body.length(); index++) {
-            int digit = Character.getNumericValue(body.charAt(index));
-            sum += (index % 2 == 0) ? digit : digit * 3;
-        }
-        return (10 - (sum % 10)) % 10;
     }
 }

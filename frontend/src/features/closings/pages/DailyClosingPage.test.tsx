@@ -20,9 +20,9 @@ vi.mock("@/features/markets/api/marketApi", () => ({
 }));
 
 vi.mock("@/features/closings/api/closingApi", () => ({
-  getDailyClosing: vi.fn(),
+  previewDailyClosing: vi.fn(),
   closeDaily: vi.fn(),
-  getMonthlyClosing: vi.fn(),
+  previewMonthlyClosing: vi.fn(),
   closeMonthly: vi.fn(),
 }));
 
@@ -30,7 +30,7 @@ vi.mock("@/shared/lib/files/downloadCsv", () => ({
   downloadCsv: vi.fn(),
 }));
 
-import { closeDaily, closeMonthly, getDailyClosing, getMonthlyClosing } from "@/features/closings/api/closingApi";
+import { closeDaily, closeMonthly, previewDailyClosing, previewMonthlyClosing } from "@/features/closings/api/closingApi";
 import { listMarkets } from "@/features/markets/api/marketApi";
 import { downloadCsv } from "@/shared/lib/files/downloadCsv";
 
@@ -43,7 +43,7 @@ describe("DailyClosingPage", () => {
     vi.clearAllMocks();
   });
 
-  it("shows an empty state when the closing query returns 404", async () => {
+  it("shows the daily preview before saving the closing", async () => {
     vi.mocked(listMarkets).mockResolvedValue([
       {
         id: 1,
@@ -60,8 +60,29 @@ describe("DailyClosingPage", () => {
         updatedAt: "2026-03-15T00:00:00Z",
       },
     ]);
-    vi.mocked(getDailyClosing).mockRejectedValue(new ApiError("Not found", 404));
-    vi.mocked(getMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewDailyClosing).mockResolvedValue({
+      marketId: 1,
+      marketName: "Mercado Creativo",
+      closingDate: "2026-03-15",
+      saleCount: 1,
+      totalSalesAmount: 15000,
+      totalCommissionAmount: 1000,
+      totalNetAmount: 14000,
+      closedAt: null,
+      closedBy: "Vista previa",
+      stores: [
+        {
+          storeId: 5,
+          storeName: "PKM Store",
+          saleCount: 1,
+          totalSalesAmount: 15000,
+          totalCommissionAmount: 1000,
+          totalNetAmount: 14000,
+          totalItems: 2,
+        },
+      ],
+    });
+    vi.mocked(previewMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
     vi.mocked(closeDaily).mockResolvedValue({
       marketId: 1,
       marketName: "Mercado Creativo",
@@ -113,7 +134,8 @@ describe("DailyClosingPage", () => {
     await user.selectOptions(screen.getByLabelText("Espacio"), "1");
 
     await waitFor(() => {
-      expect(screen.getByText("No existe cierre para esa fecha")).toBeInTheDocument();
+      expect(screen.getByText("Informe preliminar")).toBeInTheDocument();
+      expect(screen.getAllByText("PKM Store").length).toBeGreaterThan(0);
     });
   });
 
@@ -134,8 +156,19 @@ describe("DailyClosingPage", () => {
         updatedAt: "2026-03-15T00:00:00Z",
       },
     ]);
-    vi.mocked(getDailyClosing).mockRejectedValue(new ApiError("Not found", 404));
-    vi.mocked(getMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewDailyClosing).mockResolvedValue({
+      marketId: 1,
+      marketName: "Mercado Creativo",
+      closingDate: "2026-03-15",
+      saleCount: 0,
+      totalSalesAmount: 0,
+      totalCommissionAmount: 0,
+      totalNetAmount: 0,
+      closedAt: null,
+      closedBy: "Vista previa",
+      stores: [],
+    });
+    vi.mocked(previewMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
 
     let resolveClose: ((value: any) => void) | undefined;
     vi.mocked(closeDaily).mockImplementation(
@@ -169,15 +202,15 @@ describe("DailyClosingPage", () => {
     await user.selectOptions(screen.getByLabelText("Espacio"), "1");
 
     await waitFor(() => {
-      expect(screen.getByText("No existe cierre para esa fecha")).toBeInTheDocument();
+      expect(screen.getByText("Informe preliminar")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Generar cierre diario" }));
+    await user.click(screen.getByRole("button", { name: "Guardar cierre diario" }));
     expect(screen.getByRole("heading", { name: "Confirmar cierre diario" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Confirmar cierre diario" }));
 
-    expect(screen.getByRole("button", { name: "Cerrando..." })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Consultar cierre" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Guardando..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Actualizar vista previa" })).toBeDisabled();
 
     if (resolveClose) {
       resolveClose({
@@ -195,11 +228,11 @@ describe("DailyClosingPage", () => {
     }
 
     await waitFor(() => {
-      expect(screen.getByText("Cierre diario generado correctamente.")).toBeInTheDocument();
+      expect(screen.getByText("Cierre diario guardado y actualizado correctamente.")).toBeInTheDocument();
     });
   });
 
-  it("shows the monthly closing empty state when the monthly query returns 404", async () => {
+  it("shows the monthly preview before saving the closing", async () => {
     vi.mocked(listMarkets).mockResolvedValue([
       {
         id: 1,
@@ -216,8 +249,35 @@ describe("DailyClosingPage", () => {
         updatedAt: "2026-03-15T00:00:00Z",
       },
     ]);
-    vi.mocked(getDailyClosing).mockRejectedValue(new ApiError("Not found", 404));
-    vi.mocked(getMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewDailyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewMonthlyClosing).mockResolvedValue({
+      marketId: 1,
+      marketName: "Mercado Creativo",
+      closingMonth: "2026-03",
+      saleCount: 3,
+      totalSalesAmount: 30000,
+      totalCommissionAmount: 3000,
+      totalNetAmount: 27000,
+      totalIvaAmount: 2000,
+      totalIvaToPayAmount: 1000,
+      closedAt: null,
+      closedBy: "Vista previa",
+      collaborators: [
+        {
+          collaboratorUserId: 5,
+          collaboratorName: "PKM Store",
+          collaboratorEmail: "pkm@store.cl",
+          factura: false,
+          saleCount: 3,
+          totalItems: 4,
+          totalSalesAmount: 30000,
+          totalCommissionAmount: 3000,
+          totalNetAmount: 27000,
+          totalIvaAmount: 2000,
+          ivaToPayAmount: 1000,
+        },
+      ],
+    });
 
     const user = userEvent.setup();
     const queryClient = new QueryClient({
@@ -231,7 +291,7 @@ describe("DailyClosingPage", () => {
     render(
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
-          <DailyClosingPage />
+          <DailyClosingPage defaultMode="monthly" />
         </QueryClientProvider>
       </MemoryRouter>,
     );
@@ -240,11 +300,11 @@ describe("DailyClosingPage", () => {
       expect(screen.getByRole("option", { name: "Mercado Creativo" })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Mensual" }));
     await user.selectOptions(screen.getByLabelText("Espacio"), "1");
 
     await waitFor(() => {
-      expect(screen.getByText("No existe cierre mensual para ese periodo")).toBeInTheDocument();
+      expect(screen.getByText("Informe preliminar")).toBeInTheDocument();
+      expect(screen.getByText(/Vista previa sin guardar/)).toBeInTheDocument();
     });
   });
 
@@ -265,8 +325,21 @@ describe("DailyClosingPage", () => {
         updatedAt: "2026-03-15T00:00:00Z",
       },
     ]);
-    vi.mocked(getDailyClosing).mockRejectedValue(new ApiError("Not found", 404));
-    vi.mocked(getMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewDailyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewMonthlyClosing).mockResolvedValue({
+      marketId: 1,
+      marketName: "Mercado Creativo",
+      closingMonth: "2026-03",
+      saleCount: 5,
+      totalSalesAmount: 125000,
+      totalCommissionAmount: 18000,
+      totalNetAmount: 107000,
+      totalIvaAmount: 9500,
+      totalIvaToPayAmount: 5000,
+      closedAt: null,
+      closedBy: "Vista previa",
+      collaborators: [],
+    });
     vi.mocked(closeMonthly).mockResolvedValue({
       marketId: 1,
       marketName: "Mercado Creativo",
@@ -294,7 +367,7 @@ describe("DailyClosingPage", () => {
     render(
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
-          <DailyClosingPage />
+          <DailyClosingPage defaultMode="monthly" />
         </QueryClientProvider>
       </MemoryRouter>,
     );
@@ -303,9 +376,8 @@ describe("DailyClosingPage", () => {
       expect(screen.getByRole("option", { name: "Mercado Creativo" })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Mensual" }));
     await user.selectOptions(screen.getByLabelText("Espacio"), "1");
-    await user.click(screen.getByRole("button", { name: "Generar cierre mensual" }));
+    await user.click(screen.getByRole("button", { name: "Guardar cierre mensual" }));
 
     expect(screen.getByRole("heading", { name: "Confirmar cierre mensual" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Confirmar cierre mensual" }));
@@ -332,7 +404,7 @@ describe("DailyClosingPage", () => {
         updatedAt: "2026-03-15T00:00:00Z",
       },
     ]);
-    vi.mocked(getDailyClosing).mockResolvedValue({
+    vi.mocked(previewDailyClosing).mockResolvedValue({
       marketId: 1,
       marketName: "Mercado Creativo",
       closingDate: "2026-03-15",
@@ -354,7 +426,7 @@ describe("DailyClosingPage", () => {
         },
       ],
     });
-    vi.mocked(getMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
+    vi.mocked(previewMonthlyClosing).mockRejectedValue(new ApiError("Not found", 404));
 
     const user = userEvent.setup();
     const queryClient = new QueryClient({

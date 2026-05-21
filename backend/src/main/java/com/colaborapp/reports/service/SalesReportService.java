@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +42,9 @@ import com.colaborapp.sales.repository.SaleRepository;
 import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.sales.domain.SaleStoreSummary;
 import com.colaborapp.security.AccessControlService;
+import com.colaborapp.stores.domain.StoreStatus;
 import com.colaborapp.users.domain.RoleCode;
+import com.colaborapp.users.domain.User;
 import com.colaborapp.users.repository.UserRepository;
 import com.colaborapp.stores.repository.StoreRepository;
 
@@ -160,21 +163,37 @@ public class SalesReportService {
         LocalDate businessDate = LocalDate.now(businessZone);
         Instant startAt = businessDate.atStartOfDay(businessZone).toInstant();
         Instant endAt = businessDate.plusDays(1).atStartOfDay(businessZone).toInstant();
+        Set<Long> activeCollaboratorIds = resolveActiveStoreUserIds();
+        List<SaleItem> visibleItems = filterVisibleItems(
+                saleItemRepository.findAllByMarketIdAndPeriodWithDetails(
+                        tenantId,
+                        marketId,
+                        SaleStatus.CONFIRMED,
+                        startAt,
+                        endAt),
+                activeCollaboratorIds);
 
-        Object[] summary = saleRepository.summarizeMarketByPeriod(tenantId, marketId, SaleStatus.CONFIRMED, startAt, endAt);
-        List<MarketStoreSalesSummaryResponse> salesPerStore = saleRepository
-                .summarizeMarketStoresByPeriod(tenantId, marketId, SaleStatus.CONFIRMED, startAt, endAt)
-                .stream()
-                .map(this::toMarketStoreSummary)
-                .toList();
+        Map<Long, MarketStoreAggregate> salesPerStoreMap = new LinkedHashMap<>();
+        BigDecimal totalSales = BigDecimal.ZERO.setScale(4);
+        long totalItems = 0L;
+
+        for (SaleItem item : visibleItems) {
+            totalSales = totalSales.add(item.getSubtotal());
+            totalItems += item.getQuantity();
+
+            Long storeKey = resolveReportStoreId(item);
+            String storeName = resolveReportStoreName(item);
+            salesPerStoreMap.computeIfAbsent(storeKey, ignored -> new MarketStoreAggregate(storeKey, storeName))
+                    .add(item);
+        }
 
         return new MarketSalesTodayReportResponse(
                 market.getId(),
                 market.getName(),
                 businessDate,
-                toBigDecimal(summary[0]),
-                toLong(summary[1]),
-                salesPerStore);
+                totalSales,
+                totalItems,
+                salesPerStoreMap.values().stream().map(MarketStoreAggregate::toResponse).toList());
     }
 
     @Transactional(readOnly = true)
@@ -186,18 +205,29 @@ public class SalesReportService {
         LocalDate businessDate = LocalDate.now(businessZone);
         Instant startAt = businessDate.atStartOfDay(businessZone).toInstant();
         Instant endAt = businessDate.plusDays(1).atStartOfDay(businessZone).toInstant();
+        Set<Long> activeCollaboratorIds = resolveActiveStoreUserIds();
+        List<SaleItem> visibleItems = filterVisibleItems(
+                saleItemRepository.findAllByMarketIdAndPeriodWithDetails(
+                        tenantId,
+                        marketId,
+                        SaleStatus.CONFIRMED,
+                        startAt,
+                        endAt),
+                activeCollaboratorIds);
 
-        List<StorePayoutSummary> stores = saleRepository
-                .summarizeMarketPayoutsByPeriod(tenantId, marketId, SaleStatus.CONFIRMED, startAt, endAt)
-                .stream()
-                .map(this::toStorePayoutSummary)
-                .toList();
+        Map<Long, MarketPayoutAggregate> storesMap = new LinkedHashMap<>();
+        for (SaleItem item : visibleItems) {
+            Long storeKey = resolveReportStoreId(item);
+            String storeName = resolveReportStoreName(item);
+            storesMap.computeIfAbsent(storeKey, ignored -> new MarketPayoutAggregate(storeKey, storeName))
+                    .add(item);
+        }
 
         return new MarketPayoutsTodayResponse(
                 market.getId(),
                 market.getName(),
                 businessDate,
-                stores);
+                storesMap.values().stream().map(MarketPayoutAggregate::toResponse).toList());
     }
 
     @Transactional(readOnly = true)
@@ -205,6 +235,9 @@ public class SalesReportService {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         var collaborator = userRepository.findWithAccessById(collaboratorUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("No encontramos al colaborador solicitado."));
+        if (!collaborator.isActive() || !hasRole(collaborator, RoleCode.STORE_USER)) {
+            throw new ResourceNotFoundException("No encontramos al colaborador solicitado.");
+        }
 
         validateCollaboratorAccess(collaboratorUserId, collaborator.getMarkets().stream().map(m -> m.getId()).toList());
 
@@ -213,12 +246,14 @@ public class SalesReportService {
         Instant startAt = effectiveFrom.atStartOfDay(businessZone).toInstant();
         Instant endAt = effectiveTo.plusDays(1).atStartOfDay(businessZone).toInstant();
 
-        List<SaleItem> items = saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
-                tenantId,
-                collaboratorUserId,
-                SaleStatus.CONFIRMED,
-                startAt,
-                endAt);
+        List<SaleItem> items = filterVisibleItems(
+                saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                        tenantId,
+                        collaboratorUserId,
+                        SaleStatus.CONFIRMED,
+                        startAt,
+                        endAt),
+                resolveActiveStoreUserIds());
 
         BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
         BigDecimal totalCommission = BigDecimal.ZERO.setScale(4);
@@ -328,66 +363,38 @@ public class SalesReportService {
 
     private ScopedSalesSnapshot buildScopedSalesSnapshot() {
         DailyRange range = currentBusinessRange();
+        Set<Long> activeCollaboratorIds = resolveActiveStoreUserIds();
         if (accessControlService.hasRole(RoleCode.STORE_USER)) {
-            return buildStoreUserSnapshot(range, accessControlService.getCurrentUser().user().getId());
+            return buildStoreUserSnapshot(range, accessControlService.getCurrentUser().user().getId(), activeCollaboratorIds);
         }
 
-        List<SaleStoreSummary> visibleSummaries = filterVisibleSummaries(
-                saleStoreSummaryRepository.findByPeriodWithSaleAndStore(
+        List<SaleItem> visibleItems = filterVisibleItems(
+                saleItemRepository.findAllByTenantAndPeriodWithDetails(
                         range.tenantId(),
                         SaleStatus.CONFIRMED,
                         range.startAt(),
-                        range.endAt()));
+                        range.endAt()),
+                activeCollaboratorIds);
 
-        Map<Long, SaleAggregate> sales = new LinkedHashMap<>();
-        Map<Long, StoreAggregate> stores = new LinkedHashMap<>();
-        BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
-        BigDecimal totalCommission = BigDecimal.ZERO.setScale(4);
-        BigDecimal totalNet = BigDecimal.ZERO.setScale(4);
-
-        for (SaleStoreSummary summary : visibleSummaries) {
-            totalAmount = totalAmount.add(summary.getSubtotalAmount());
-            totalCommission = totalCommission.add(summary.getTotalCommissionAmount());
-            totalNet = totalNet.add(summary.getNetAmount());
-
-            sales.computeIfAbsent(summary.getSale().getId(), ignored -> new SaleAggregate(
-                    summary.getSale().getId(),
-                    summary.getSale().getSaleNumber(),
-                    summary.getSale().getConfirmedAt()))
-                    .add(summary);
-
-            stores.computeIfAbsent(summary.getStore().getMarket().getId(), ignored -> new StoreAggregate(
-                    summary.getStore().getMarket().getId(),
-                    summary.getStore().getMarket().getName()))
-                    .add(summary);
-        }
-
-        Map<Long, List<SaleItem>> itemsBySaleId = saleItemRepository.findAllBySaleIdInWithDetails(sales.keySet().stream().toList())
-                .stream()
-                .collect(java.util.stream.Collectors.groupingBy(item -> item.getSale().getId(), LinkedHashMap::new, java.util.stream.Collectors.toList()));
-
-        sales.values().forEach(saleAggregate -> saleAggregate.attachItems(itemsBySaleId.getOrDefault(saleAggregate.saleId(), List.of())));
-
-        return new ScopedSalesSnapshot(
-                range.businessDate(),
-                sales.size(),
-                totalAmount,
-                totalCommission,
-                totalNet,
-                stores.values().stream().map(StoreAggregate::toResponse).toList(),
-                sales.values().stream().map(SaleAggregate::toResponse).toList());
+        return buildSnapshotFromItems(range.businessDate(), visibleItems);
     }
 
-    private ScopedSalesSnapshot buildStoreUserSnapshot(DailyRange range, Long collaboratorUserId) {
-        List<SaleItem> items = saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
-                range.tenantId(),
-                collaboratorUserId,
-                SaleStatus.CONFIRMED,
-                range.startAt(),
-                range.endAt());
+    private ScopedSalesSnapshot buildStoreUserSnapshot(DailyRange range, Long collaboratorUserId, Set<Long> activeCollaboratorIds) {
+        List<SaleItem> visibleItems = filterVisibleItems(
+                saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                        range.tenantId(),
+                        collaboratorUserId,
+                        SaleStatus.CONFIRMED,
+                        range.startAt(),
+                        range.endAt()),
+                activeCollaboratorIds);
 
+        return buildSnapshotFromItems(range.businessDate(), visibleItems);
+    }
+
+    private ScopedSalesSnapshot buildSnapshotFromItems(LocalDate businessDate, List<SaleItem> items) {
         Map<Long, SaleAggregate> sales = new LinkedHashMap<>();
-        Map<Long, StoreAggregate> spaces = new LinkedHashMap<>();
+        Map<Long, StoreAggregate> stores = new LinkedHashMap<>();
         BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
         BigDecimal totalCommission = BigDecimal.ZERO.setScale(4);
         BigDecimal totalNet = BigDecimal.ZERO.setScale(4);
@@ -405,37 +412,83 @@ public class SalesReportService {
 
             Long marketId = item.getStore().getMarket().getId();
             String marketName = item.getStore().getMarket().getName();
-            spaces.computeIfAbsent(marketId, ignored -> new StoreAggregate(marketId, marketName))
+            stores.computeIfAbsent(marketId, ignored -> new StoreAggregate(marketId, marketName))
                     .addItem(item);
         }
 
         return new ScopedSalesSnapshot(
-                range.businessDate(),
+                businessDate,
                 sales.size(),
                 totalAmount,
                 totalCommission,
                 totalNet,
-                spaces.values().stream().map(StoreAggregate::toResponse).toList(),
+                stores.values().stream().map(StoreAggregate::toResponse).toList(),
                 sales.values().stream().map(SaleAggregate::toResponse).toList());
     }
 
-    private List<SaleStoreSummary> filterVisibleSummaries(List<SaleStoreSummary> summaries) {
-        if (accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)) {
-            return summaries;
+    private List<SaleItem> filterVisibleItems(List<SaleItem> items, Set<Long> activeCollaboratorIds) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
         }
 
-        Set<Long> allowedStoreIds = Set.copyOf(accessControlService.currentStoreIds());
-        Set<Long> allowedMarketIds = Set.copyOf(accessControlService.currentMarketIds());
+        Set<Long> allowedStoreIds = accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)
+                ? Set.of()
+                : Set.copyOf(accessControlService.currentStoreIds());
+        Set<Long> allowedMarketIds = accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)
+                ? Set.of()
+                : Set.copyOf(accessControlService.currentMarketIds());
+        Long currentStoreUserId = accessControlService.hasRole(RoleCode.STORE_USER)
+                ? accessControlService.getCurrentUser().user().getId()
+                : null;
 
-        if (accessControlService.hasRole(RoleCode.STORE_USER)) {
-            return summaries.stream()
-                    .filter(summary -> allowedStoreIds.contains(summary.getStore().getId()))
-                    .toList();
-        }
-
-        return summaries.stream()
-                .filter(summary -> allowedMarketIds.contains(summary.getStore().getMarket().getId()))
+        return items.stream()
+                .filter(this::isActiveStoreItem)
+                .filter(item -> item.getCollaboratorUserId() == null || activeCollaboratorIds.contains(item.getCollaboratorUserId()))
+                .filter(item -> {
+                    if (accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)) {
+                        return true;
+                    }
+                    if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+                        return currentStoreUserId != null
+                                && currentStoreUserId.equals(item.getCollaboratorUserId())
+                                && (allowedStoreIds.isEmpty() || allowedStoreIds.contains(item.getStore().getId()));
+                    }
+                    return allowedMarketIds.contains(item.getStore().getMarket().getId());
+                })
                 .toList();
+    }
+
+    private boolean isActiveStoreItem(SaleItem item) {
+        return item.getStore() != null
+                && item.getStore().getStatus() == StoreStatus.ACTIVE
+                && item.getStore().getMarket() != null;
+    }
+
+    private Set<Long> resolveActiveStoreUserIds() {
+        List<User> users = userRepository.findAllByOrderByFullNameAsc();
+        if (users == null || users.isEmpty()) {
+            return Set.of();
+        }
+        return users.stream()
+                .filter(User::isActive)
+                .filter(user -> hasRole(user, RoleCode.STORE_USER))
+                .map(User::getId)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private boolean hasRole(User user, RoleCode roleCode) {
+        return user.getRoles().stream().anyMatch(role -> role.getCode() == roleCode);
+    }
+
+    private Long resolveReportStoreId(SaleItem item) {
+        return item.getCollaboratorUserId() != null ? item.getCollaboratorUserId() : item.getStore().getId();
+    }
+
+    private String resolveReportStoreName(SaleItem item) {
+        if (item.getCollaboratorNameSnapshot() != null && !item.getCollaboratorNameSnapshot().isBlank()) {
+            return item.getCollaboratorNameSnapshot();
+        }
+        return item.getStore().getName();
     }
 
     private long countActiveProducts(Long tenantId) {
@@ -522,7 +575,7 @@ public class SalesReportService {
         private BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
         private BigDecimal totalCommission = BigDecimal.ZERO.setScale(4);
         private BigDecimal totalNet = BigDecimal.ZERO.setScale(4);
-        private final List<SaleDetailStoreSummaryResponse> stores = new java.util.ArrayList<>();
+        private final Map<Long, SaleStoreLineAggregate> stores = new LinkedHashMap<>();
         private final List<SaleTodayItemResponse> items = new java.util.ArrayList<>();
 
         private SaleAggregate(Long saleId, String saleNumber, Instant confirmedAt) {
@@ -531,42 +584,12 @@ public class SalesReportService {
             this.confirmedAt = confirmedAt;
         }
 
-        private Long saleId() {
-            return saleId;
-        }
-
-        private void add(SaleStoreSummary summary) {
-            totalAmount = totalAmount.add(summary.getSubtotalAmount());
-            totalCommission = totalCommission.add(summary.getTotalCommissionAmount());
-            totalNet = totalNet.add(summary.getNetAmount());
-            stores.add(new SaleDetailStoreSummaryResponse(
-                    summary.getStore().getMarket().getId(),
-                    summary.getStore().getMarket().getName(),
-                    summary.getLineCount(),
-                    summary.getUnitCount(),
-                    summary.getSubtotalAmount(),
-                    summary.getTotalCommissionAmount(),
-                    summary.getNetAmount()));
-        }
-
         private void addItem(SaleItem item) {
             totalAmount = totalAmount.add(item.getSubtotal());
             totalCommission = totalCommission.add(item.getTotalCommissionAmount());
             totalNet = totalNet.add(item.getNetAmount());
+            addStoreContribution(item);
             items.add(new SaleTodayItemResponse(
-                    item.getId(),
-                    item.getProductNameSnapshot(),
-                    item.getCollaboratorNameSnapshot(),
-                    item.getStore().getMarket().getName(),
-                    item.getQuantity(),
-                    item.getSubtotal(),
-                    item.getTotalCommissionAmount(),
-                    item.getNetAmount()));
-        }
-
-        private void attachItems(List<SaleItem> saleItems) {
-            for (SaleItem item : saleItems) {
-                items.add(new SaleTodayItemResponse(
                     item.getId(),
                     item.getProductNameSnapshot(),
                     item.getCollaboratorNameSnapshot(),
@@ -575,7 +598,13 @@ public class SalesReportService {
                     item.getSubtotal(),
                         item.getTotalCommissionAmount(),
                         item.getNetAmount()));
-            }
+        }
+
+        private void addStoreContribution(SaleItem item) {
+            Long marketId = item.getStore().getMarket().getId();
+            String marketName = item.getStore().getMarket().getName();
+            stores.computeIfAbsent(marketId, ignored -> new SaleStoreLineAggregate(marketId, marketName))
+                    .add(item);
         }
 
         private SaleTodayDetailResponse toResponse() {
@@ -586,8 +615,42 @@ public class SalesReportService {
                     totalAmount,
                     totalCommission,
                     totalNet,
-                    stores,
+                    stores.values().stream().map(SaleStoreLineAggregate::toResponse).toList(),
                     items);
+        }
+    }
+
+    private static final class SaleStoreLineAggregate {
+        private final Long storeId;
+        private final String storeName;
+        private int lineCount = 0;
+        private int unitCount = 0;
+        private BigDecimal subtotalAmount = BigDecimal.ZERO.setScale(4);
+        private BigDecimal totalCommissionAmount = BigDecimal.ZERO.setScale(4);
+        private BigDecimal netAmount = BigDecimal.ZERO.setScale(4);
+
+        private SaleStoreLineAggregate(Long storeId, String storeName) {
+            this.storeId = storeId;
+            this.storeName = storeName;
+        }
+
+        private void add(SaleItem item) {
+            lineCount += 1;
+            unitCount += item.getQuantity();
+            subtotalAmount = subtotalAmount.add(item.getSubtotal());
+            totalCommissionAmount = totalCommissionAmount.add(item.getTotalCommissionAmount());
+            netAmount = netAmount.add(item.getNetAmount());
+        }
+
+        private SaleDetailStoreSummaryResponse toResponse() {
+            return new SaleDetailStoreSummaryResponse(
+                    storeId,
+                    storeName,
+                    lineCount,
+                    unitCount,
+                    subtotalAmount,
+                    totalCommissionAmount,
+                    netAmount);
         }
     }
 
@@ -626,6 +689,52 @@ public class SalesReportService {
                     subtotalAmount,
                     totalCommissionAmount,
                     netAmount);
+        }
+    }
+
+    private static final class MarketStoreAggregate {
+        private final Long storeId;
+        private final String storeName;
+        private BigDecimal totalSales = BigDecimal.ZERO.setScale(4);
+        private long totalItems = 0L;
+
+        private MarketStoreAggregate(Long storeId, String storeName) {
+            this.storeId = storeId;
+            this.storeName = storeName;
+        }
+
+        private void add(SaleItem item) {
+            totalSales = totalSales.add(item.getSubtotal());
+            totalItems += item.getQuantity();
+        }
+
+        private MarketStoreSalesSummaryResponse toResponse() {
+            return new MarketStoreSalesSummaryResponse(storeId, storeName, totalSales, totalItems);
+        }
+    }
+
+    private static final class MarketPayoutAggregate {
+        private final Long storeId;
+        private final String storeName;
+        private final Set<Long> saleIds = new java.util.LinkedHashSet<>();
+        private BigDecimal subtotal = BigDecimal.ZERO.setScale(4);
+        private BigDecimal commission = BigDecimal.ZERO.setScale(4);
+        private BigDecimal netAmount = BigDecimal.ZERO.setScale(4);
+
+        private MarketPayoutAggregate(Long storeId, String storeName) {
+            this.storeId = storeId;
+            this.storeName = storeName;
+        }
+
+        private void add(SaleItem item) {
+            saleIds.add(item.getSale().getId());
+            subtotal = subtotal.add(item.getSubtotal());
+            commission = commission.add(item.getTotalCommissionAmount());
+            netAmount = netAmount.add(item.getNetAmount());
+        }
+
+        private StorePayoutSummary toResponse() {
+            return new StorePayoutSummary(storeId, storeName, subtotal, commission, netAmount, saleIds.size());
         }
     }
 

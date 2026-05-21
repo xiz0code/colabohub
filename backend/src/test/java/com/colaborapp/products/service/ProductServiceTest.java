@@ -143,7 +143,7 @@ class ProductServiceTest {
     }
 
     @Test
-    void shouldRejectDuplicatedBarcodeGeneratedInternally() {
+    void shouldRejectDuplicatedShortBarcodeGeneratedInternally() {
         ProductCreateRequest request = new ProductCreateRequest(
                 2L,
                 7L,
@@ -159,12 +159,12 @@ class ProductServiceTest {
         when(storeService.getStoreEntity(2L, 1L)).thenReturn(store);
         when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
         when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-1")).thenReturn(false);
-        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000007");
-        when(productRepository.existsByBarcode("7500000000007")).thenReturn(true);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("0000007");
+        when(productRepository.existsByShortBarcode("0000007")).thenReturn(true);
 
         assertThatThrownBy(() -> productService.createProduct(request))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("No pudimos generar un codigo de barras unico. Intenta nuevamente.");
+                .hasMessage("No pudimos generar un codigo corto unico. Intenta nuevamente.");
 
         verify(productRepository, never()).save(any(Product.class));
     }
@@ -186,8 +186,8 @@ class ProductServiceTest {
         when(storeService.getStoreEntity(2L, 1L)).thenReturn(store);
         when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
         when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-1")).thenReturn(false);
-        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000007");
-        when(productRepository.existsByBarcode("7500000000007")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("0000007");
+        when(productRepository.existsByShortBarcode("0000007")).thenReturn(false);
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
             Product product = invocation.getArgument(0);
             product.setId(20L);
@@ -204,7 +204,7 @@ class ProductServiceTest {
         verify(productAuditService).logChange(productCaptor.getValue(), "Producto creado", null, "Producto A");
         assertThat(productCaptor.getValue().getStatus()).isEqualTo(ProductStatus.ACTIVE);
         assertThat(productCaptor.getValue().getOwnerUser()).isEqualTo(collaborator);
-        assertThat(response.barcode()).isEqualTo("7500000000007");
+        assertThat(response.barcode()).isEqualTo("0000007");
         assertThat(response.name()).isEqualTo("Producto A");
     }
 
@@ -227,8 +227,8 @@ class ProductServiceTest {
         when(storeRepository.findByMarketIdAndType(14L, StoreType.STOCK)).thenReturn(Optional.of(store));
         when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
         when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-2")).thenReturn(false);
-        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000099");
-        when(productRepository.existsByBarcode("7500000000099")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("0000099");
+        when(productRepository.existsByShortBarcode("0000099")).thenReturn(false);
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         productService.createProduct(request);
@@ -261,8 +261,8 @@ class ProductServiceTest {
         });
         when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
         when(productRepository.existsByStoreIdAndSkuIgnoreCase(22L, "SKU-3")).thenReturn(false);
-        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000199");
-        when(productRepository.existsByBarcode("7500000000199")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("0000199");
+        when(productRepository.existsByShortBarcode("0000199")).thenReturn(false);
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ProductResponse response = productService.createProduct(request);
@@ -300,8 +300,8 @@ class ProductServiceTest {
         when(storeRepository.findByMarketIdAndType(14L, StoreType.STOCK)).thenReturn(Optional.of(store));
         when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
         when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-TIENDA")).thenReturn(false);
-        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000399");
-        when(productRepository.existsByBarcode("7500000000399")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("0000399");
+        when(productRepository.existsByShortBarcode("0000399")).thenReturn(false);
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ProductResponse response = productService.createProduct(request);
@@ -329,8 +329,8 @@ class ProductServiceTest {
         when(storeRepository.findByMarketIdAndType(14L, StoreType.STOCK)).thenReturn(Optional.of(store));
         when(userRepository.findWithAccessById(7L)).thenReturn(Optional.of(collaborator));
         when(productRepository.existsByStoreIdAndSkuIgnoreCase(2L, "SKU-4")).thenReturn(false);
-        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("7500000000299");
-        when(productRepository.existsByBarcode("7500000000299")).thenReturn(false);
+        when(barcodeGenerator.generateUniqueBarcode()).thenReturn("0000299");
+        when(productRepository.existsByShortBarcode("0000299")).thenReturn(false);
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         productService.createProduct(request);
@@ -351,6 +351,7 @@ class ProductServiceTest {
         product.setSalePrice(new BigDecimal("1000.00"));
         product.setStock(20);
         product.setStatus(ProductStatus.ACTIVE);
+        product.setShortBarcode("0000011");
         product.setBarcode("7500000000011");
         product.setVersion(0L);
 

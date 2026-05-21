@@ -2,12 +2,15 @@ package com.colaborapp.products.service;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
 import com.colaborapp.products.web.dto.BarcodeLabelRequest;
+import com.colaborapp.products.web.dto.BarcodeLabelRequest.BarcodeLabelFormat;
 import com.colaborapp.products.web.dto.ProductResponse;
 
 @Service
@@ -28,22 +31,36 @@ public class BarcodeLabelPdfService {
     };
 
     public byte[] generateLabels(List<ProductResponse> products, BarcodeLabelRequest request) {
-        List<ProductResponse> labels = new ArrayList<>();
+        Map<Long, ProductResponse> productById = new HashMap<>();
+        for (ProductResponse product : products) {
+            productById.put(product.id(), product);
+        }
+
+        int totalLabels = request.items().stream()
+                .mapToInt(BarcodeLabelRequest.BarcodeLabelItemRequest::quantity)
+                .sum();
+        List<ProductResponse> labels = new ArrayList<>(Math.max(totalLabels, 0));
         for (BarcodeLabelRequest.BarcodeLabelItemRequest item : request.items()) {
-            ProductResponse product = products.stream()
-                    .filter(candidate -> candidate.id().equals(item.productId()))
-                    .findFirst()
-                    .orElseThrow();
+            ProductResponse product = productById.get(item.productId());
+            if (product == null) {
+                throw new IllegalArgumentException("Product not found for barcode label generation.");
+            }
             for (int index = 0; index < item.quantity(); index++) {
                 labels.add(product);
             }
         }
 
+        return switch (request.format()) {
+            case LETTER -> generateSheetLabels(labels, request.includeCollaboratorName(), 612d, 792d);
+            case LABEL_30X20 -> generateCompactRollLabels(labels);
+            case A4 -> generateSheetLabels(labels, request.includeCollaboratorName(), 595d, 842d);
+        };
+    }
+
+    private byte[] generateSheetLabels(List<ProductResponse> labels, boolean includeCollaboratorName, double pageWidth, double pageHeight) {
         PdfBuilder pdf = new PdfBuilder();
         pdf.beginPage();
 
-        double pageWidth = 595d;
-        double pageHeight = 842d;
         double leftMargin = 28.35d;
         double rightMargin = 28.35d;
         double topMargin = 42.5d;
@@ -68,14 +85,27 @@ public class BarcodeLabelPdfService {
             double x = leftMargin + (column * (labelWidth + gapX));
             double yTop = pageHeight - topMargin - (row * (labelHeight + gapY));
 
-            drawLabel(pdf, labels.get(index), request.includeCollaboratorName(), x, yTop, labelWidth, labelHeight);
+            drawSheetLabel(pdf, labels.get(index), includeCollaboratorName, x, yTop, labelWidth, labelHeight);
         }
 
         pdf.endPage(pageWidth, pageHeight);
         return pdf.build();
     }
 
-    private void drawLabel(PdfBuilder pdf, ProductResponse product, boolean includeCollaboratorName, double x, double yTop, double width, double height) {
+    private byte[] generateCompactRollLabels(List<ProductResponse> labels) {
+        PdfBuilder pdf = new PdfBuilder();
+        double pageWidth = mmToPoints(30d);
+        double pageHeight = mmToPoints(20d);
+
+        for (ProductResponse product : labels) {
+            pdf.beginPage();
+            drawCompactLabel(pdf, product, 0d, pageHeight, pageWidth, pageHeight);
+            pdf.endPage(pageWidth, pageHeight);
+        }
+        return pdf.build();
+    }
+
+    private void drawSheetLabel(PdfBuilder pdf, ProductResponse product, boolean includeCollaboratorName, double x, double yTop, double width, double height) {
         double bottom = yTop - height;
         double inset = 6d;
         pdf.roundedRect(x, bottom, width, height, 10d, "1 1 1", "0.82 0.78 0.9");
@@ -89,17 +119,31 @@ public class BarcodeLabelPdfService {
         pdf.text(x + inset, bottom + 4.4d, 5.0d, product.barcode(), false);
     }
 
-    private void drawCode128(PdfBuilder pdf, String barcode, double x, double y, double maxWidth, double height) {
-        List<Integer> codes = new ArrayList<>();
-        codes.add(104);
-        for (char character : barcode.toCharArray()) {
-            if (character < 32 || character > 126) {
-                throw new IllegalArgumentException("Unsupported barcode content for CODE128-B.");
-            }
-            codes.add(character - 32);
+    private void drawCompactLabel(PdfBuilder pdf, ProductResponse product, double x, double yTop, double width, double height) {
+        double bottom = yTop - height;
+        String collaboratorName = product.ownerFullName() != null && !product.ownerFullName().isBlank()
+                ? product.ownerFullName()
+                : product.storeName();
+        double barcodeWidth = width - 18d;
+        double barcodeHeight = 16.3d;
+        double barcodeTextSize = 6.2d;
+        double barcodeTextY = bottom + 2.8d;
+        double barcodeY = bottom + 9.6d;
+        double centerX = x + (width / 2d);
+        pdf.roundedRect(x + 1d, bottom + 1d, width - 2d, height - 2d, 4d, "1 1 1", "0.82 0.78 0.9");
+        pdf.textCentered(centerX, bottom + 40.5d, 6.2d, formatPrice(product.salePrice()), true);
+        if (collaboratorName != null && !collaboratorName.isBlank()) {
+            pdf.textCentered(centerX, bottom + 34.8d, 3.3d, truncate(collaboratorName, 20), false);
         }
+        pdf.textCentered(centerX, bottom + 29.4d, 5.6d, truncate(product.name(), 18), true);
+        drawCode128(pdf, product.barcode(), x + ((width - barcodeWidth) / 2d), barcodeY, barcodeWidth, barcodeHeight);
+        pdf.textCentered(centerX, barcodeTextY, barcodeTextSize, truncate(product.barcode(), 16), true);
+    }
 
-        int checksum = 104;
+    private void drawCode128(PdfBuilder pdf, String barcode, double x, double y, double maxWidth, double height) {
+        List<Integer> codes = encodeCode128(barcode);
+
+        int checksum = codes.get(0);
         for (int index = 1; index < codes.size(); index++) {
             checksum += codes.get(index) * index;
         }
@@ -116,7 +160,7 @@ public class BarcodeLabelPdfService {
         }
 
         int totalModules = modules.stream().mapToInt(Integer::intValue).sum();
-        double moduleWidth = Math.min(0.92d, maxWidth / totalModules);
+        double moduleWidth = Math.min(1.25d, maxWidth / totalModules);
         double renderedWidth = totalModules * moduleWidth;
         double cursor = x + Math.max((maxWidth - renderedWidth) / 2d, 0d);
         boolean bar = true;
@@ -128,6 +172,50 @@ public class BarcodeLabelPdfService {
             cursor += sectionWidth;
             bar = !bar;
         }
+    }
+
+    private List<Integer> encodeCode128(String barcode) {
+        if (barcode == null || barcode.isBlank()) {
+            throw new IllegalArgumentException("Barcode content is required.");
+        }
+
+        if (barcode.chars().allMatch(Character::isDigit)) {
+            return encodeNumericCode128(barcode);
+        }
+
+        List<Integer> codes = new ArrayList<>();
+        codes.add(104);
+        for (char character : barcode.toCharArray()) {
+            if (character < 32 || character > 126) {
+                throw new IllegalArgumentException("Unsupported barcode content for CODE128-B.");
+            }
+            codes.add(character - 32);
+        }
+        return codes;
+    }
+
+    private List<Integer> encodeNumericCode128(String barcode) {
+        List<Integer> codes = new ArrayList<>();
+        int index = 0;
+
+        if (barcode.length() % 2 != 0) {
+            codes.add(104);
+            char firstDigit = barcode.charAt(0);
+            if (firstDigit < 32 || firstDigit > 126) {
+                throw new IllegalArgumentException("Unsupported barcode content for CODE128-B.");
+            }
+            codes.add(firstDigit - 32);
+            codes.add(99);
+            index = 1;
+        } else {
+            codes.add(105);
+        }
+
+        for (; index < barcode.length(); index += 2) {
+            int pairValue = Integer.parseInt(barcode.substring(index, index + 2));
+            codes.add(pairValue);
+        }
+        return codes;
     }
 
     private String truncate(String value, int maxLength) {
@@ -142,6 +230,10 @@ public class BarcodeLabelPdfService {
             return "$0";
         }
         return "$" + salePrice.setScale(0, java.math.RoundingMode.HALF_UP).toPlainString().replaceAll("\\B(?=(\\d{3})+(?!\\d))", ".");
+    }
+
+    private double mmToPoints(double millimeters) {
+        return millimeters * 72d / 25.4d;
     }
 
     private static final class PdfBuilder {
@@ -179,6 +271,11 @@ public class BarcodeLabelPdfService {
             currentPage.append(format(Locale.US, "%.2f %.2f Td\n", x, y));
             currentPage.append('(').append(escape(value)).append(") Tj\n");
             currentPage.append("ET\n");
+        }
+
+        private void textCentered(double centerX, double y, double size, String value, boolean bold) {
+            double approximateWidth = value.length() * size * (bold ? 0.31d : 0.27d);
+            text(centerX - approximateWidth, y, size, value, bold);
         }
 
         private void endPage(double pageWidth, double pageHeight) {

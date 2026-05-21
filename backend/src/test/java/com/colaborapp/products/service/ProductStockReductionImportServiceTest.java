@@ -3,11 +3,13 @@ package com.colaborapp.products.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -59,13 +61,19 @@ class ProductStockReductionImportServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        TransactionTemplate passthroughTransactionTemplate = new TransactionTemplate() {
+            @Override
+            public <T> T execute(TransactionCallback<T> action) {
+                return action.doInTransaction(null);
+            }
+        };
         service = new ProductStockReductionImportService(
                 productImportService,
                 productRepository,
                 inventoryService,
                 currentTenantProvider,
                 accessControlService,
-                transactionTemplate);
+                passthroughTransactionTemplate);
 
         tenant = new Tenant();
         tenant.setId(1L);
@@ -83,6 +91,7 @@ class ProductStockReductionImportServiceTest {
         product.setId(30L);
         product.setTenant(tenant);
         product.setStore(store);
+        product.setShortBarcode("0000030");
         product.setBarcode("7501234567890");
         product.setStatus(ProductStatus.ACTIVE);
 
@@ -91,23 +100,19 @@ class ProductStockReductionImportServiceTest {
             return new String(file.getBytes(), StandardCharsets.UTF_8);
         });
         lenient().when(productImportService.parseCsvLine(any())).thenCallRealMethod();
-        lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
-            @SuppressWarnings("unchecked")
-            TransactionCallback<Boolean> callback = invocation.getArgument(0);
-            return callback.doInTransaction(null);
-        });
     }
 
     @Test
-    void shouldReduceStockByBarcode() {
+    void shouldReduceStockByProductCode() {
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
-        when(productRepository.findByBarcodeForPos(1L, "7501234567890", ProductStatus.ACTIVE)).thenReturn(Optional.of(product));
+        when(productRepository.findByBarcodeForPos(eq(1L), any(String.class), eq(ProductStatus.ACTIVE))).thenReturn(Optional.of(product));
+        when(productImportService.parseCsvLine("0000030,2")).thenReturn(List.of("0000030", "2"));
 
         MockMultipartFile file = new MockMultipartFile(
                 "file",
                 "reduccion.csv",
                 "text/csv",
-                "codigo_barra,cantidad\n7501234567890,2".getBytes(StandardCharsets.UTF_8));
+                "codigo_producto,cantidad\n0000030,2".getBytes(StandardCharsets.UTF_8));
 
         var response = service.importCsv(file);
 
@@ -130,6 +135,6 @@ class ProductStockReductionImportServiceTest {
 
         assertThatThrownBy(() -> service.importCsv(file))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("La plantilla no coincide. Usa las columnas codigo_barra,cantidad.");
+                .hasMessage("La plantilla no coincide. Usa las columnas codigo_producto,cantidad.");
     }
 }

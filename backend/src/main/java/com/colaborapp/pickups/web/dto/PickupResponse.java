@@ -11,6 +11,7 @@ public record PickupResponse(
         String marketName,
         Long storeId,
         String storeName,
+        String pickupBarcode,
         String pickupNumber,
         String customerName,
         String description,

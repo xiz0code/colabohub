@@ -5,6 +5,7 @@ import { useSession } from "@/features/auth/session/SessionProvider";
 import { usePosLauncher } from "@/features/sales/components/PosLauncherProvider";
 import {
   cancelPosSale,
+  editPosSale,
   getPosSale,
   listPosSales,
   type PosSale,
@@ -24,7 +25,7 @@ type Feedback = {
 export function SalesPage() {
   const queryClient = useQueryClient();
   const { user, primaryRole } = useSession();
-  const { openPos, isOpening } = usePosLauncher();
+  const { openPos, openPosWithSale, isOpening } = usePosLauncher();
   const [detailSaleId, setDetailSaleId] = useState<number | null>(null);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -66,6 +67,19 @@ export function SalesPage() {
       setFeedback({ kind: "success", message: "Venta anulada y stock restaurado correctamente." });
     },
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible anular la venta.") }),
+  });
+
+  const editMutation = useMutation({
+    mutationFn: (saleId: number) => editPosSale(saleId),
+    onSuccess: (sale) => {
+      queryClient.setQueryData(["pos", "sales", sale.id], sale);
+      void queryClient.invalidateQueries({ queryKey: ["pos", "sales"] });
+      setDetailSaleId(null);
+      setFeedback({ kind: "success", message: "Venta cargada en la caja para edición." });
+      openPosWithSale(sale);
+    },
+    onError: (error) =>
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible abrir la venta para edición.") }),
   });
 
   const saleForDetail = detailSaleQuery.data ?? null;
@@ -179,6 +193,15 @@ export function SalesPage() {
                         {sale.status === "CONFIRMED" ? (
                           <button
                             type="button"
+                            onClick={() => editMutation.mutate(sale.id)}
+                            className="rounded-full border border-violet-200 px-3 py-1.5 text-xs font-semibold text-violet-700"
+                          >
+                            Editar
+                          </button>
+                        ) : null}
+                        {sale.status === "CONFIRMED" ? (
+                          <button
+                            type="button"
                             onClick={() =>
                               openDetailMutation.mutate(sale.id, {
                                 onSuccess: () => setIsCancelModalOpen(true),
@@ -239,6 +262,18 @@ export function SalesPage() {
                 kind="info"
                 message={`Venta anulada${saleForDetail.cancelledBy ? ` por ${saleForDetail.cancelledBy}` : ""}${saleForDetail.cancellationReason ? `: ${saleForDetail.cancellationReason}` : "."}`}
               />
+            ) : null}
+
+            {saleForDetail.status === "CONFIRMED" ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => editMutation.mutate(saleForDetail.id)}
+                  className="rounded-2xl border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700"
+                >
+                  Editar venta
+                </button>
+              </div>
             ) : null}
 
             <div className="soft-table">

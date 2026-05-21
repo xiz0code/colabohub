@@ -132,7 +132,7 @@ class DailyClosingServiceTest {
     }
 
     @Test
-    void closeDayReturnsExistingClosingIfAlreadyCreated() {
+    void closeDayUpdatesExistingClosingIfAlreadyCreated() {
         DailyClosing existing = new DailyClosing();
         existing.setId(91L);
         existing.setMarket(market);
@@ -157,16 +157,20 @@ class DailyClosingServiceTest {
 
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(dailyClosingRepository.findByMarketIdAndClosingDateWithMarket(1L, 5L, closingDate)).thenReturn(Optional.of(existing));
-        when(dailyClosingCollaboratorRepository.findByDailyClosingIdOrderByCollaboratorNameSnapshotAsc(91L)).thenReturn(List.of());
-        when(dailyClosingStoreRepository.findByDailyClosingIdOrderByStoreNameSnapshotAsc(91L)).thenReturn(List.of(store));
-        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
+        when(marketRepository.findByIdAndTenantId(5L, 1L)).thenReturn(Optional.of(market));
+        when(collaboratorSalesSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of(
+                collaboratorSummary(11L, "Tienda Ana", "ana@tienda.cl", 1L, 2L, "22000.0000", "1200.0000", "20800.0000")));
+        when(dailyClosingRepository.save(any(DailyClosing.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         DailyClosingResponse response = dailyClosingService.closeDay(5L, closingDate, "tester");
 
-        assertThat(response.saleCount()).isEqualTo(3L);
+        assertThat(response.saleCount()).isEqualTo(1L);
         assertThat(response.stores()).hasSize(1);
-        verify(dailyClosingRepository, never()).save(any(DailyClosing.class));
-        verify(dailyClosingEmailService, never()).sendClosingSummary(any(), any());
+        assertThat(response.totalSalesAmount()).isEqualByComparingTo("22000.0000");
+        verify(dailyClosingRepository).save(existing);
+        verify(dailyClosingCollaboratorRepository).deleteByDailyClosingId(91L);
+        verify(dailyClosingStoreRepository).deleteByDailyClosingId(91L);
+        verify(dailyClosingEmailService).sendClosingSummary("admin@mercado.cl", response);
     }
 
     @Test
@@ -355,6 +359,7 @@ class DailyClosingServiceTest {
                 new BigDecimal(totalNetAmount),
                 BigDecimal.ZERO.setScale(4),
                 BigDecimal.ZERO.setScale(4),
+                List.of(),
                 List.of());
     }
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SalesPage } from "@/features/sales/pages/SalesPage";
 
 const openPosMock = vi.fn();
+const openPosWithSaleMock = vi.fn();
 
 vi.mock("@/features/auth/session/SessionProvider", () => ({
   useSession: () => ({
@@ -27,6 +28,7 @@ vi.mock("@/features/auth/session/SessionProvider", () => ({
 vi.mock("@/features/sales/components/PosLauncherProvider", () => ({
   usePosLauncher: () => ({
     openPos: openPosMock,
+    openPosWithSale: openPosWithSaleMock,
     canOperatePos: true,
     isOpening: false,
   }),
@@ -35,6 +37,7 @@ vi.mock("@/features/sales/components/PosLauncherProvider", () => ({
 vi.mock("@/features/sales/api/posApi", () => ({
   addPosSaleItem: vi.fn(),
   cancelPosSale: vi.fn(),
+  editPosSale: vi.fn(),
   confirmPosSale: vi.fn(),
   createPosSale: vi.fn(),
   getPosSale: vi.fn(),
@@ -49,6 +52,7 @@ vi.mock("@/features/sales/api/posApi", () => ({
 
 import {
   cancelPosSale,
+  editPosSale,
   confirmPosSale,
   createPosSale,
   getPosSale,
@@ -170,8 +174,10 @@ describe("SalesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     openPosMock.mockReset();
+    openPosWithSaleMock.mockReset();
     vi.mocked(listPosSales).mockResolvedValue(buildSales());
     vi.mocked(getPosSale).mockResolvedValue(buildSale("CONFIRMED"));
+    vi.mocked(editPosSale).mockResolvedValue(buildSale("OPEN"));
     vi.mocked(searchPosProducts).mockResolvedValue([]);
   });
 
@@ -228,6 +234,22 @@ describe("SalesPage", () => {
 
     await waitFor(() => {
       expect(cancelPosSale).toHaveBeenCalledWith(10, "Cliente solicito anulacion");
+    });
+  });
+
+  it("abre una venta confirmada para editarla en el POS", async () => {
+    renderPage();
+
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Editar" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Editar" }));
+
+    await waitFor(() => {
+      expect(editPosSale).toHaveBeenCalledWith(10);
+      expect(openPosWithSaleMock).toHaveBeenCalled();
     });
   });
 

@@ -74,10 +74,7 @@ public class DailyClosingService {
     @Transactional
     public DailyClosingResponse closeDay(Long marketId, LocalDate closingDate, String closedBy) {
         LocalDate effectiveDate = closingDate == null ? LocalDate.now(businessZone) : closingDate;
-        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
-        return dailyClosingRepository.findByMarketIdAndClosingDateWithMarket(tenantId, marketId, effectiveDate)
-                .map(this::toResponse)
-                .orElseGet(() -> createClosing(marketId, effectiveDate, closedBy));
+        return persistClosing(marketId, effectiveDate, closedBy);
     }
 
     @Transactional(readOnly = true)
@@ -90,7 +87,54 @@ public class DailyClosingService {
         return toResponse(closing);
     }
 
-    private DailyClosingResponse createClosing(Long marketId, LocalDate closingDate, String closedBy) {
+    @Transactional(readOnly = true)
+    public DailyClosingResponse previewDay(Long marketId, LocalDate closingDate) {
+        LocalDate effectiveDate = closingDate == null ? LocalDate.now(businessZone) : closingDate;
+        ClosingSnapshot snapshot = buildSnapshot(marketId, effectiveDate);
+        return toResponse(snapshot.market(), effectiveDate, null, "Vista previa", snapshot.collaboratorSummaries());
+    }
+
+    private DailyClosingResponse persistClosing(Long marketId, LocalDate closingDate, String closedBy) {
+        ClosingSnapshot snapshot = buildSnapshot(marketId, closingDate);
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        DailyClosing closing = dailyClosingRepository.findByMarketIdAndClosingDateWithMarket(tenantId, marketId, closingDate)
+                .orElseGet(DailyClosing::new);
+
+        closing.setMarket(snapshot.market());
+        closing.setClosingDate(closingDate);
+        applyTotals(closing, snapshot.collaboratorSummaries());
+        closing.setClosedAt(Instant.now());
+        closing.setClosedBy(closedBy);
+        dailyClosingRepository.save(closing);
+
+        dailyClosingCollaboratorRepository.deleteByDailyClosingId(closing.getId());
+        dailyClosingStoreRepository.deleteByDailyClosingId(closing.getId());
+
+        List<DailyClosingCollaborator> collaborators = snapshot.collaboratorSummaries().stream()
+                .map(summary -> toCollaboratorRow(closing, summary))
+                .toList();
+        if (!collaborators.isEmpty()) {
+            dailyClosingCollaboratorRepository.saveAll(collaborators);
+        }
+
+        DailyClosingResponse response = toResponse(closing, collaborators);
+        try {
+            dailyClosingEmailService.sendClosingSummary(snapshot.market().getEmail(), response);
+        } catch (Exception exception) {
+            log.warn("Daily closing email could not be sent for market {} and date {}.", marketId, closingDate, exception);
+        }
+        try {
+            collaboratorClosingEmailService.sendDailySummaries(
+                    snapshot.market().getName(),
+                    closingDate,
+                    snapshot.collaboratorSummaries());
+        } catch (Exception exception) {
+            log.warn("Daily collaborator closing emails could not be sent for market {} and date {}.", marketId, closingDate, exception);
+        }
+        return response;
+    }
+
+    private ClosingSnapshot buildSnapshot(Long marketId, LocalDate closingDate) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         Market market = marketRepository.findByIdAndTenantId(marketId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("La tienda solicitada no existe o no tienes acceso a ella."));
@@ -101,39 +145,14 @@ public class DailyClosingService {
         List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
                 collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
 
-        DailyClosing closing = new DailyClosing();
-        closing.setMarket(market);
-        closing.setClosingDate(closingDate);
+        return new ClosingSnapshot(market, collaboratorSummaries);
+    }
+
+    private void applyTotals(DailyClosing closing, List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
         closing.setSaleCount(collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum());
         closing.setTotalSalesAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()));
         closing.setTotalCommissionAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()));
         closing.setTotalNetAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()));
-        closing.setClosedAt(Instant.now());
-        closing.setClosedBy(closedBy);
-        dailyClosingRepository.save(closing);
-
-        List<DailyClosingCollaborator> collaborators = collaboratorSummaries.stream()
-                .map(summary -> toCollaboratorRow(closing, summary))
-                .toList();
-        if (!collaborators.isEmpty()) {
-            dailyClosingCollaboratorRepository.saveAll(collaborators);
-        }
-
-        DailyClosingResponse response = toResponse(closing, collaborators);
-        try {
-            dailyClosingEmailService.sendClosingSummary(market.getEmail(), response);
-        } catch (Exception exception) {
-            log.warn("Daily closing email could not be sent for market {} and date {}.", marketId, closingDate, exception);
-        }
-        try {
-            collaboratorClosingEmailService.sendDailySummaries(
-                    market.getName(),
-                    closingDate,
-                    collaboratorSummaries);
-        } catch (Exception exception) {
-            log.warn("Daily collaborator closing emails could not be sent for market {} and date {}.", marketId, closingDate, exception);
-        }
-        return response;
     }
 
     private DailyClosingCollaborator toCollaboratorRow(
@@ -184,6 +203,34 @@ public class DailyClosingService {
                         .toList());
     }
 
+    private DailyClosingResponse toResponse(
+            Market market,
+            LocalDate closingDate,
+            Instant closedAt,
+            String closedBy,
+            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
+        return new DailyClosingResponse(
+                market.getId(),
+                market.getName(),
+                closingDate,
+                collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum(),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()),
+                closedAt,
+                closedBy,
+                collaboratorSummaries.stream()
+                        .map(summary -> new DailyClosingStoreResponse(
+                                summary.collaboratorUserId(),
+                                summary.collaboratorName(),
+                                summary.saleCount(),
+                                summary.totalSalesAmount(),
+                                summary.totalCommissionAmount(),
+                                summary.totalNetAmount(),
+                                summary.totalItems()))
+                        .toList());
+    }
+
     private DailyClosingResponse rebuildLegacyClosingIfNeeded(DailyClosing closing) {
         Instant startAt = closing.getClosingDate().atStartOfDay(businessZone).toInstant();
         Instant endAt = closing.getClosingDate().plusDays(1).atStartOfDay(businessZone).toInstant();
@@ -228,5 +275,10 @@ public class DailyClosingService {
 
     private BigDecimal sum(List<BigDecimal> values) {
         return values.stream().reduce(ZERO, BigDecimal::add);
+    }
+
+    private record ClosingSnapshot(
+            Market market,
+            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
     }
 }

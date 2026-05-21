@@ -22,8 +22,10 @@ vi.mock("@/features/pickups/api/pickupsApi", () => ({
   listPickups: vi.fn(),
   createPickup: vi.fn(),
   checkoutPickup: vi.fn(),
+  checkoutPickupByCode: vi.fn(),
   collectPickup: vi.fn(),
   cancelPickup: vi.fn(),
+  downloadPickupLabel: vi.fn(),
 }));
 
 vi.mock("@/features/users/api/userApi", () => ({
@@ -99,6 +101,7 @@ describe("PickupsPage", () => {
         marketName: "Tienda Leon",
         storeId: 5,
         storeName: "Tienda Felipe",
+        pickupBarcode: "RET-0000100",
         pickupNumber: "IG115",
         customerName: "Karina",
         description: "Polera personalizada negra",
@@ -116,6 +119,7 @@ describe("PickupsPage", () => {
         marketName: "Tienda Leon",
         storeId: 9,
         storeName: "Tienda Igor",
+        pickupBarcode: "RET-0000101",
         pickupNumber: "#1004",
         customerName: "Martin",
         description: "Pedido web ya pagado",
@@ -135,6 +139,7 @@ describe("PickupsPage", () => {
       marketName: "Tienda Leon",
       storeId: 5,
       storeName: "Tienda Felipe",
+      pickupBarcode: "RET-0000102",
       pickupNumber: "WEB-200",
       customerName: "Javiera",
       description: "Pedido Instagram",
@@ -154,6 +159,7 @@ describe("PickupsPage", () => {
         marketName: "Tienda Leon",
         storeId: 5,
         storeName: "Tienda Felipe",
+        pickupBarcode: "RET-0000100",
         pickupNumber: "IG115",
         customerName: "Karina",
         description: "Polera personalizada negra",
@@ -197,6 +203,7 @@ describe("PickupsPage", () => {
       marketName: "Tienda Leon",
       storeId: 5,
       storeName: "Tienda Felipe",
+      pickupBarcode: "RET-0000103",
       pickupNumber: "PAG-30",
       customerName: "Rocio",
       description: "Pedido ya pagado",
@@ -215,6 +222,7 @@ describe("PickupsPage", () => {
       marketName: "Tienda Leon",
       storeId: 5,
       storeName: "Tienda Felipe",
+      pickupBarcode: "RET-0000104",
       pickupNumber: "CAN-11",
       customerName: "Paula",
       description: "Retiro anulado",
@@ -233,6 +241,7 @@ describe("PickupsPage", () => {
     renderPage();
 
     expect(await screen.findByText("Monto por cobrar")).toBeInTheDocument();
+    await screen.findByText("IG115");
     expect(screen.getByText("$12.000")).toBeInTheDocument();
     expect(screen.getByText("Retiro pagado vs retiro por pagar")).toBeInTheDocument();
 
@@ -292,6 +301,7 @@ describe("PickupsPage", () => {
         marketName: "Tienda Leon",
         storeId: 5,
         storeName: "Tienda Felipe",
+        pickupBarcode: "RET-0000103",
         pickupNumber: "PAG-30",
         customerName: "Rocio",
         description: "Pedido ya pagado",
@@ -334,7 +344,7 @@ describe("PickupsPage", () => {
     await screen.findByText("IG115");
     await user.click(screen.getByRole("button", { name: "Nuevo retiro" }));
 
-    expect(screen.getByText("Tienda Felipe")).toBeInTheDocument();
+    expect(screen.getAllByText("Tienda Felipe").length).toBeGreaterThan(0);
     expect(screen.queryByRole("option", { name: "Selecciona una Tienda" })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Numero de retiro"), "WEB-201");

@@ -127,6 +127,7 @@ export type BarcodeLabelInput = {
     quantity: number;
   }>;
   includeCollaboratorName: boolean;
+  format?: "A4" | "LETTER" | "LABEL_30X20";
 };
 
 export type ProductImportResult = {
@@ -180,6 +181,13 @@ export function updateProductStatus(productId: number, status: Product["status"]
   return apiFetch<RawProduct>(`/api/products/${productId}/status`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
+  }).then(normalizeProduct);
+}
+
+export function increaseProductStock(productId: number, quantity: number) {
+  return apiFetch<RawProduct>(`/api/products/${productId}/stock/increase`, {
+    method: "POST",
+    body: JSON.stringify({ quantity }),
   }).then(normalizeProduct);
 }
 

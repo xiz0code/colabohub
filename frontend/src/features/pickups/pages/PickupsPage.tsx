@@ -2,7 +2,16 @@ import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
-import { listPickups, createPickup, checkoutPickup, collectPickup, cancelPickup, type Pickup, type PickupStatus } from "@/features/pickups/api/pickupsApi";
+import {
+  listPickups,
+  createPickup,
+  checkoutPickup,
+  collectPickup,
+  cancelPickup,
+  downloadPickupLabel,
+  type Pickup,
+  type PickupStatus,
+} from "@/features/pickups/api/pickupsApi";
 import { usePosLauncher } from "@/features/sales/components/PosLauncherProvider";
 import { listUsers } from "@/features/users/api/userApi";
 import { EmptyState } from "@/shared/components/feedback/EmptyState";
@@ -117,6 +126,20 @@ export function PickupsPage() {
       await queryClient.invalidateQueries({ queryKey: ["pickups"] });
     },
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos anular el retiro.") }),
+  });
+
+  const printLabelMutation = useMutation({
+    mutationFn: (pickup: Pickup) => downloadPickupLabel(pickup.id).then((blob) => ({ blob, pickup })),
+    onSuccess: ({ blob, pickup }) => {
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `retiro-${pickup.pickupNumber}.pdf`;
+      anchor.click();
+      window.URL.revokeObjectURL(url);
+      setFeedback({ kind: "success", message: `Etiqueta del retiro ${pickup.pickupNumber} lista para imprimir.` });
+    },
+    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos descargar la etiqueta del retiro.") }),
   });
 
   const visiblePickups = pickupsQuery.data ?? [];
@@ -271,6 +294,7 @@ export function PickupsPage() {
                   <tr key={pickup.id}>
                     <td>
                       <div className="font-medium">{pickup.pickupNumber}</div>
+                      <div className="text-xs text-muted-foreground">Codigo: {pickup.pickupBarcode}</div>
                       <div className="text-xs text-muted-foreground">{formatDate(pickup.createdAt)}</div>
                     </td>
                     <td>{pickup.customerName}</td>
@@ -301,6 +325,14 @@ export function PickupsPage() {
                             Marcar retirado
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => printLabelMutation.mutate(pickup)}
+                          disabled={printLabelMutation.isPending}
+                          className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 disabled:opacity-50"
+                        >
+                          Imprimir etiqueta
+                        </button>
                         <button
                           type="button"
                           onClick={() => cancelMutation.mutate(pickup.id)}

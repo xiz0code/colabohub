@@ -45,6 +45,24 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
             join fetch si.store store
             join fetch store.market market
             where sale.tenant.id = :tenantId
+              and sale.status = :status
+              and sale.confirmedAt >= :startAt
+              and sale.confirmedAt < :endAt
+            order by sale.confirmedAt asc, si.id asc
+            """)
+    List<SaleItem> findAllByTenantAndPeriodWithDetails(
+            @Param("tenantId") Long tenantId,
+            @Param("status") com.colaborapp.sales.domain.SaleStatus status,
+            @Param("startAt") Instant startAt,
+            @Param("endAt") Instant endAt);
+
+    @Query("""
+            select si from SaleItem si
+            join fetch si.sale sale
+            left join fetch si.product product
+            join fetch si.store store
+            join fetch store.market market
+            where sale.tenant.id = :tenantId
               and market.id = :marketId
               and sale.status = :status
               and sale.confirmedAt >= :startAt

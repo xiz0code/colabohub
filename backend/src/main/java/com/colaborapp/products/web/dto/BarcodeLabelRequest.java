@@ -9,7 +9,20 @@ import jakarta.validation.constraints.NotNull;
 
 public record BarcodeLabelRequest(
         @NotEmpty List<@Valid BarcodeLabelItemRequest> items,
-        boolean includeCollaboratorName) {
+        boolean includeCollaboratorName,
+        BarcodeLabelFormat format) {
+
+    public BarcodeLabelRequest {
+        if (format == null) {
+            format = BarcodeLabelFormat.A4;
+        }
+    }
+
+    public enum BarcodeLabelFormat {
+        A4,
+        LETTER,
+        LABEL_30X20
+    }
 
     public record BarcodeLabelItemRequest(
             @NotNull Long productId,

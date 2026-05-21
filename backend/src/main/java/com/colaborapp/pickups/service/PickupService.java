@@ -18,6 +18,7 @@ import com.colaborapp.pickups.web.dto.PreparePickupCheckoutResponse;
 import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.sales.domain.Sale;
 import com.colaborapp.sales.domain.SaleStatus;
+import com.colaborapp.sales.repository.SaleItemRepository;
 import com.colaborapp.sales.repository.SaleRepository;
 import com.colaborapp.sales.service.PosSaleService;
 import com.colaborapp.sales.web.dto.PosSaleResponse;
@@ -31,10 +32,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PickupService {
 
+    private static final String PICKUP_BARCODE_PREFIX = "RET-";
+    private static final int PICKUP_BARCODE_PAD = 7;
+
     private final PickupRepository pickupRepository;
     private final StoreRepository storeRepository;
     private final ProductRepository productRepository;
     private final SaleRepository saleRepository;
+    private final SaleItemRepository saleItemRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final PosSaleService posSaleService;
     private final com.colaborapp.security.AccessControlService accessControlService;
@@ -46,15 +51,12 @@ public class PickupService {
         var currentUser = authenticatedUserService.getCurrentUserSnapshot();
 
         Long marketId = null;
+        Long collaboratorUserId = null;
         List<Long> scopedStoreIds = List.of();
         boolean storeIdsEmpty = true;
 
         if (currentUser.roles().contains(RoleCode.STORE_USER.name())) {
-            scopedStoreIds = resolveAccessibleStoreIds(currentUser.user().getId(), currentUser.storeIds(), tenantId);
-            storeIdsEmpty = scopedStoreIds.isEmpty();
-            if (storeIdsEmpty) {
-                scopedStoreIds = List.of(-1L);
-            }
+            collaboratorUserId = currentUser.user().getId();
         } else if (currentUser.roles().contains(RoleCode.ADMIN_MARKET.name()) || currentUser.roles().contains(RoleCode.SELLER.name())) {
             marketId = currentUser.marketIds().size() == 1 ? currentUser.marketIds().getFirst() : null;
         } else if (currentUser.roles().contains(RoleCode.ADMIN_SYSTEM.name())) {
@@ -70,7 +72,7 @@ public class PickupService {
         }
 
         String normalizedQuery = normalizeQuery(query);
-        return pickupRepository.search(tenantId, marketId, scopedStoreIds, storeIdsEmpty, status, normalizedQuery).stream()
+        return pickupRepository.search(tenantId, marketId, scopedStoreIds, storeIdsEmpty, collaboratorUserId, status, normalizedQuery).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -83,12 +85,17 @@ public class PickupService {
         }
 
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        var currentUser = authenticatedUserService.getCurrentUserSnapshot();
         Store store = resolveStoreForCreate(storeId, tenantId);
 
         Pickup pickup = new Pickup();
         pickup.setTenant(currentTenantProvider.getCurrentTenant());
         pickup.setMarket(store.getMarket());
         pickup.setStore(store);
+        if (currentUser.roles().contains(RoleCode.STORE_USER.name())) {
+            pickup.setCollaboratorUserId(currentUser.user().getId());
+            pickup.setCollaboratorNameSnapshot(currentUser.user().getFullName());
+        }
         pickup.setPickupNumber(pickupNumber.trim());
         pickup.setCustomerName(customerName.trim());
         pickup.setDescription(description.trim());
@@ -115,7 +122,10 @@ public class PickupService {
 
             Store store = storeRepository.findByIdAndTenantId(effectiveStoreId, tenantId)
                     .orElseThrow(() -> new ResourceNotFoundException("No encontramos la Tienda asociada a tu cuenta para el retiro."));
-            requireStoreAccessForPickup(store.getId(), currentUser.user().getId(), currentUser.storeIds(), tenantId);
+            Pickup accessProbe = new Pickup();
+            accessProbe.setStore(store);
+            accessProbe.setCollaboratorUserId(currentUser.user().getId());
+            requireStoreAccessForPickup(accessProbe, currentUser.user().getId(), currentUser.storeIds(), tenantId);
             return store;
         }
 
@@ -171,13 +181,17 @@ public class PickupService {
                 return new PreparePickupCheckoutResponse(toResponse(pickup), posSaleService.getSale(linkedSale.getId()));
             }
             if (linkedSale != null && linkedSale.getStatus() == SaleStatus.CONFIRMED) {
-                pickup.setStatus(PickupStatus.COLLECTED);
-                pickup.setCollectedAt(linkedSale.getConfirmedAt());
-                pickup.setCollectedBy(linkedSale.getUpdatedBy());
-                return new PreparePickupCheckoutResponse(toResponse(pickup), posSaleService.getSale(linkedSale.getId()));
+                if (saleItemRepository.findBySaleIdAndManualReference(linkedSale.getId(), "pickup:" + pickup.getId()).isPresent()) {
+                    pickup.setStatus(PickupStatus.COLLECTED);
+                    pickup.setCollectedAt(linkedSale.getConfirmedAt());
+                    pickup.setCollectedBy(linkedSale.getUpdatedBy());
+                    return new PreparePickupCheckoutResponse(toResponse(pickup), posSaleService.getSale(linkedSale.getId()));
+                }
             }
             pickup.setLinkedSale(null);
             pickup.setStatus(PickupStatus.PENDING);
+            pickup.setCollectedAt(null);
+            pickup.setCollectedBy(null);
         }
 
         PosSaleResponse openSale = posSaleService.getOpenSaleOrNull(pickup.getMarket().getId());
@@ -189,10 +203,30 @@ public class PickupService {
                         pickup.getDescription(),
                         pickup.getAmountDue(),
                         "pickup:" + pickup.getId(),
-                        1));
+                        1,
+                        pickup.getCollaboratorUserId(),
+                        pickup.getCollaboratorNameSnapshot()));
         pickup.setLinkedSale(saleRepository.findByIdAndTenantId(preparedSale.id(), currentTenantProvider.getCurrentTenant().getId()).orElse(null));
         pickup.setStatus(PickupStatus.CHECKOUT_IN_PROGRESS);
         return new PreparePickupCheckoutResponse(toResponse(pickup), preparedSale);
+    }
+
+    @Transactional
+    public PreparePickupCheckoutResponse prepareCheckoutByCode(String code) {
+        requireOperationalAccess();
+
+        String normalizedCode = normalizeCode(code);
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        Long marketId = authenticatedUserService.getCurrentUserSnapshot().activeMarketId();
+
+        Pickup pickup = resolvePickupByCode(tenantId, marketId, normalizedCode);
+        return prepareCheckout(pickup.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public PickupResponse getPickupForLabel(Long pickupId) {
+        requirePickupViewerAccess();
+        return toResponse(getPickup(pickupId));
     }
 
     @Transactional
@@ -248,7 +282,7 @@ public class PickupService {
         Pickup pickup = pickupRepository.findByIdAndTenantIdWithDetails(pickupId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("No encontramos el retiro solicitado."));
         var currentUser = authenticatedUserService.getCurrentUserSnapshot();
-        requireStoreAccessForPickup(pickup.getStore().getId(), currentUser.user().getId(), currentUser.storeIds(), tenantId);
+        requireStoreAccessForPickup(pickup, currentUser.user().getId(), currentUser.storeIds(), tenantId);
         return pickup;
     }
 
@@ -264,15 +298,22 @@ public class PickupService {
                 .toList();
     }
 
-    private void requireStoreAccessForPickup(Long storeId, Long userId, List<Long> assignedStoreIds, Long tenantId) {
+    private void requireStoreAccessForPickup(Pickup pickup, Long userId, List<Long> assignedStoreIds, Long tenantId) {
         if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+            if (pickup.getCollaboratorUserId() != null) {
+                if (!pickup.getCollaboratorUserId().equals(userId)) {
+                    throw new BusinessException("No tienes acceso a la Tienda asociada a este retiro.");
+                }
+                return;
+            }
+
             List<Long> accessibleStoreIds = resolveAccessibleStoreIds(userId, assignedStoreIds, tenantId);
-            if (!accessibleStoreIds.contains(storeId)) {
+            if (!accessibleStoreIds.contains(pickup.getStore().getId())) {
                 throw new BusinessException("No tienes acceso a la Tienda asociada a este retiro.");
             }
             return;
         }
-        accessControlService.requireStoreAccess(storeId);
+        accessControlService.requireStoreAccess(pickup.getStore().getId());
     }
 
     private void requireCreateAccess() {
@@ -283,13 +324,21 @@ public class PickupService {
         accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
     }
 
+    private void requirePickupViewerAccess() {
+        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER, RoleCode.STORE_USER);
+    }
+
     private PickupResponse toResponse(Pickup pickup) {
+        String displayStoreName = pickup.getCollaboratorNameSnapshot() != null && !pickup.getCollaboratorNameSnapshot().isBlank()
+                ? pickup.getCollaboratorNameSnapshot()
+                : pickup.getStore().getName();
         return new PickupResponse(
                 pickup.getId(),
                 pickup.getMarket().getId(),
                 pickup.getMarket().getName(),
                 pickup.getStore().getId(),
-                pickup.getStore().getName(),
+                displayStoreName,
+                buildPickupBarcode(pickup.getId()),
                 pickup.getPickupNumber(),
                 pickup.getCustomerName(),
                 pickup.getDescription(),
@@ -307,5 +356,54 @@ public class PickupService {
             return null;
         }
         return "%" + query.trim().toLowerCase() + "%";
+    }
+
+    private String normalizeCode(String code) {
+        if (code == null || code.isBlank()) {
+            throw new BusinessException("Escanea o ingresa un codigo de retiro valido.");
+        }
+        return code.trim().toUpperCase();
+    }
+
+    private Pickup resolvePickupByCode(Long tenantId, Long marketId, String normalizedCode) {
+        Long pickupId = parsePickupBarcode(normalizedCode);
+        if (pickupId != null) {
+            Pickup pickup = pickupRepository.findByIdAndTenantIdWithDetails(pickupId, tenantId)
+                    .orElseThrow(() -> new ResourceNotFoundException("No encontramos un retiro por pagar con ese codigo."));
+            if (marketId != null && !pickup.getMarket().getId().equals(marketId)) {
+                throw new BusinessException("Ese retiro pertenece a otro Espacio.");
+            }
+            return pickup;
+        }
+
+        List<Pickup> matches = pickupRepository.findAllByTenantIdAndMarketIdAndPickupNumber(tenantId, marketId, normalizedCode.toLowerCase());
+        if (matches.isEmpty()) {
+            throw new ResourceNotFoundException("No encontramos un retiro por pagar con ese codigo.");
+        }
+        if (matches.size() > 1) {
+            throw new BusinessException("Encontramos mas de un retiro con ese numero. Usa el codigo de barras del retiro para evitar ambiguedades.");
+        }
+        return matches.getFirst();
+    }
+
+    private Long parsePickupBarcode(String normalizedCode) {
+        if (!normalizedCode.startsWith(PICKUP_BARCODE_PREFIX)) {
+            return null;
+        }
+
+        String numericSection = normalizedCode.substring(PICKUP_BARCODE_PREFIX.length()).trim();
+        if (numericSection.isBlank()) {
+            return null;
+        }
+
+        try {
+            return Long.valueOf(numericSection);
+        } catch (NumberFormatException exception) {
+            throw new BusinessException("El codigo de retiro escaneado no es valido.");
+        }
+    }
+
+    private String buildPickupBarcode(Long pickupId) {
+        return PICKUP_BARCODE_PREFIX + String.format("%0" + PICKUP_BARCODE_PAD + "d", pickupId);
     }
 }

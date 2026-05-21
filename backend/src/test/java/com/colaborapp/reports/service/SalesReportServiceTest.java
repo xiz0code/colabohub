@@ -1,6 +1,7 @@
 package com.colaborapp.reports.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -28,6 +29,7 @@ import com.colaborapp.sales.repository.SaleRepository;
 import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.stores.domain.Store;
+import com.colaborapp.stores.domain.StoreStatus;
 import com.colaborapp.stores.repository.StoreRepository;
 import com.colaborapp.tenant.domain.Tenant;
 import com.colaborapp.users.domain.Role;
@@ -96,6 +98,9 @@ class SalesReportServiceTest {
         Role collaboratorRole = new Role();
         collaboratorRole.setCode(RoleCode.STORE_USER);
         collaborator.getRoles().add(collaboratorRole);
+        lenient().when(userRepository.findAllByOrderByFullNameAsc()).thenReturn(List.of(collaborator));
+        lenient().when(accessControlService.currentStoreIds()).thenReturn(List.of(1L));
+        lenient().when(accessControlService.currentMarketIds()).thenReturn(List.of(1L));
     }
 
     @Test
@@ -166,6 +171,35 @@ class SalesReportServiceTest {
     }
 
     @Test
+    void storeUserTodayDetailsStillWorkWhenAssignedStoreIdsAreEmpty() {
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(accessControlService.hasRole(RoleCode.STORE_USER)).thenReturn(true);
+        when(accessControlService.currentStoreIds()).thenReturn(List.of());
+        when(accessControlService.getCurrentUser()).thenReturn(new AuthenticatedUserService.CurrentAuthenticatedUser(
+                collaborator,
+                List.of("STORE_USER"),
+                true,
+                1L,
+                "Mercado 1",
+                List.of(1L),
+                List.of(),
+                List.of("Mercado 1")));
+        when(saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(SaleStatus.CONFIRMED),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(item("Sticker BTS", 2, "4000.0000", "200.0000", "3800.0000")));
+
+        var response = salesReportService.getTodayDetails();
+
+        assertThat(response.salesCount()).isEqualTo(1L);
+        assertThat(response.totalAmount()).isEqualByComparingTo("4000.0000");
+        assertThat(response.sales()).hasSize(1);
+    }
+
+    @Test
     void collaboratorSalesReportReturnsEntriesAndTotals() {
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)).thenReturn(true);
@@ -193,6 +227,39 @@ class SalesReportServiceTest {
         assertThat(response.entries().getFirst().fixedCommissionAmount()).isEqualByComparingTo("33.0000");
     }
 
+    @Test
+    void todayDetailsExcludeInactiveCollaborators() {
+        User inactiveCollaborator = new User();
+        inactiveCollaborator.setId(8L);
+        inactiveCollaborator.setFullName("Tienda Inactiva");
+        inactiveCollaborator.setActive(false);
+        Role collaboratorRole = new Role();
+        collaboratorRole.setCode(RoleCode.STORE_USER);
+        inactiveCollaborator.getRoles().add(collaboratorRole);
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(accessControlService.hasRole(RoleCode.STORE_USER)).thenReturn(false);
+        when(accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)).thenReturn(true);
+        when(userRepository.findAllByOrderByFullNameAsc()).thenReturn(List.of(collaborator, inactiveCollaborator));
+        when(saleItemRepository.findAllByTenantAndPeriodWithDetails(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq(SaleStatus.CONFIRMED),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(
+                        item("Sticker BTS", 2, "4000.0000", "200.0000", "3800.0000"),
+                        itemForCollaborator(8L, "Tienda Inactiva", "Album oculto", 1, "12000.0000", "500.0000", "11500.0000")));
+
+        var response = salesReportService.getTodayDetails();
+
+        assertThat(response.salesCount()).isEqualTo(1L);
+        assertThat(response.totalAmount()).isEqualByComparingTo("4000.0000");
+        assertThat(response.sales()).singleElement().satisfies(sale -> {
+            assertThat(sale.items()).extracting(itemResponse -> itemResponse.collaboratorName()).containsExactly("Camila");
+            assertThat(sale.items()).extracting(itemResponse -> itemResponse.productName()).doesNotContain("Album oculto");
+        });
+    }
+
     private SaleStoreSummary summary(
             Long saleId,
             String saleNumber,
@@ -213,6 +280,7 @@ class SalesReportServiceTest {
         store.setName(storeName);
         store.setMarket(market);
         store.setTenant(currentTenant);
+        store.setStatus(StoreStatus.ACTIVE);
 
         Sale sale = new Sale();
         sale.setId(saleId);
@@ -244,10 +312,11 @@ class SalesReportServiceTest {
         market.setName("Mercado 1");
 
         Store store = new Store();
-        store.setId(10L);
+        store.setId(1L);
         store.setName("Tienda A");
         store.setMarket(market);
         store.setTenant(currentTenant);
+        store.setStatus(StoreStatus.ACTIVE);
 
         Sale sale = new Sale();
         sale.setId(500L);
@@ -274,6 +343,20 @@ class SalesReportServiceTest {
         item.setSubtotal(new BigDecimal(subtotal));
         item.setTotalCommissionAmount(new BigDecimal(commission));
         item.setNetAmount(new BigDecimal(net));
+        return item;
+    }
+
+    private SaleItem itemForCollaborator(
+            Long collaboratorId,
+            String collaboratorName,
+            String productName,
+            int quantity,
+            String subtotal,
+            String commission,
+            String net) {
+        SaleItem item = item(productName, quantity, subtotal, commission, net);
+        item.setCollaboratorUserId(collaboratorId);
+        item.setCollaboratorNameSnapshot(collaboratorName);
         return item;
     }
 }

@@ -20,6 +20,7 @@ public interface PickupRepository extends JpaRepository<Pickup, Long> {
             where p.tenant.id = :tenantId
               and (:marketId is null or m.id = :marketId)
               and (:storeIdsEmpty = true or s.id in :storeIds)
+              and (:collaboratorUserId is null or p.collaboratorUserId = :collaboratorUserId)
               and (:status is null or p.status = :status)
               and (
                   :query is null
@@ -34,6 +35,7 @@ public interface PickupRepository extends JpaRepository<Pickup, Long> {
             @Param("marketId") Long marketId,
             @Param("storeIds") List<Long> storeIds,
             @Param("storeIdsEmpty") boolean storeIdsEmpty,
+            @Param("collaboratorUserId") Long collaboratorUserId,
             @Param("status") PickupStatus status,
             @Param("query") String query);
 
@@ -46,6 +48,21 @@ public interface PickupRepository extends JpaRepository<Pickup, Long> {
               and p.tenant.id = :tenantId
             """)
     Optional<Pickup> findByIdAndTenantIdWithDetails(@Param("pickupId") Long pickupId, @Param("tenantId") Long tenantId);
+
+    @Query("""
+            select p from Pickup p
+            join fetch p.store s
+            join fetch p.market m
+            left join fetch p.linkedSale sale
+            where p.tenant.id = :tenantId
+              and (:marketId is null or m.id = :marketId)
+              and lower(p.pickupNumber) = :pickupNumber
+            order by p.createdAt desc, p.id desc
+            """)
+    List<Pickup> findAllByTenantIdAndMarketIdAndPickupNumber(
+            @Param("tenantId") Long tenantId,
+            @Param("marketId") Long marketId,
+            @Param("pickupNumber") String pickupNumber);
 
     List<Pickup> findAllByLinkedSaleId(Long saleId);
 }

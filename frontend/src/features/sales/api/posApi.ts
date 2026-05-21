@@ -119,6 +119,12 @@ export function getPosSale(saleId: number) {
   return apiFetch<PosSale>(`/api/pos/sales/${saleId}`);
 }
 
+export function editPosSale(saleId: number) {
+  return apiFetch<PosSale>(`/api/pos/sales/${saleId}/edit`, {
+    method: "POST",
+  });
+}
+
 export function addPosSaleItem(saleId: number, productId: number, quantity = 1) {
   return apiFetch<PosSale>(`/api/pos/sales/${saleId}/items`, {
     method: "POST",
@@ -152,8 +158,14 @@ export function scanPosProduct(barcode: string) {
   return apiFetch<PosProduct>(`/api/pos/products/scan/${encodeURIComponent(barcode)}`);
 }
 
-export function searchPosProducts(query: string) {
-  return apiFetch<PosProduct[]>(`/api/pos/products/search?q=${encodeURIComponent(query)}`);
+export function searchPosProducts(query: string, options: { size?: number; ownerUserId?: number } = {}) {
+  const search = new URLSearchParams();
+  search.set("q", query);
+  search.set("size", String(options.size ?? 50));
+  if (options.ownerUserId) {
+    search.set("ownerUserId", String(options.ownerUserId));
+  }
+  return apiFetch<PosProduct[]>(`/api/pos/products/search?${search.toString()}`);
 }
 
 export function updatePosSaleItem(saleId: number, itemId: number, quantity: number) {

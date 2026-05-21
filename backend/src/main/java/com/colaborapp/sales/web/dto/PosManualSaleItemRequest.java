@@ -14,5 +14,7 @@ public record PosManualSaleItemRequest(
         @Size(max = 500) String description,
         @NotNull @DecimalMin("0.01") BigDecimal amount,
         @Size(max = 120) String reference,
-        @NotNull @Min(1) Integer quantity) {
+        @NotNull @Min(1) Integer quantity,
+        Long collaboratorUserId,
+        @Size(max = 180) String collaboratorName) {
 }

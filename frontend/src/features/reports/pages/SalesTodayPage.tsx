@@ -17,18 +17,25 @@ import { PageHeader } from "@/shared/components/ui/PageHeader";
 import { ApiError } from "@/shared/lib/api/client";
 import { downloadCsv } from "@/shared/lib/files/downloadCsv";
 
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return formatDateInputValue(new Date());
 }
 
 function monthStart() {
   const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().slice(0, 10);
+  return formatDateInputValue(new Date(date.getFullYear(), date.getMonth(), 1));
 }
 
 function monthEnd() {
   const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().slice(0, 10);
+  return formatDateInputValue(new Date(date.getFullYear(), date.getMonth() + 1, 0));
 }
 
 type SalesReportTab = "today" | "collaborators";
@@ -84,7 +91,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
   });
 
   const collaborators = useMemo(
-    () => (collaboratorsQuery.data ?? []).filter((listedUser) => listedUser.roles.includes("STORE_USER")),
+    () => (collaboratorsQuery.data ?? []).filter((listedUser) => listedUser.active && listedUser.roles.includes("STORE_USER")),
     [collaboratorsQuery.data],
   );
 
@@ -203,7 +210,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
             <MetricCard label="Ventas confirmadas de hoy" value={String(salesTodayQuery.data.salesCount)} />
             <MetricCard label="Monto de hoy" value={formatMoney(salesTodayQuery.data.totalAmount)} />
             <MetricCard
-              label={isCollaborator ? "Ticket promedio de hoy" : "Comision total de hoy"}
+              label={isCollaborator ? "Ticket promedio de hoy" : "Comisión total de hoy"}
               value={formatMoney(isCollaborator ? dailyAverageTicket : salesTodayQuery.data.totalCommission)}
             />
             <MetricCard label="Neto de hoy" value={formatMoney(salesTodayQuery.data.totalNet)} />
@@ -272,20 +279,20 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                   </div>
                 ) : collaboratorReportQuery.data ? (
                   <div className="mt-5 space-y-5">
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <MetricCard label="Ventas del periodo" value={String(monthlySaleCount)} />
                       <MetricCard label="Unidades vendidas" value={String(monthlyUnitsSold)} />
-                      <MetricCard label="Total del mes" value={formatMoney(collaboratorReportQuery.data.totalAmount)} />
-                      <MetricCard label="IVA del mes" value={formatMoney(collaboratorReportQuery.data.totalIvaAmount)} />
-                      <MetricCard label="Neto Tienda" value={formatMoney(collaboratorReportQuery.data.totalNetAmount)} />
+                      <MetricCard label="Ticket promedio" value={formatMoney(monthlyAverageTicket)} />
+                      <MetricCard label="Producto más vendido" value={monthlyBestProduct} />
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <MetricCard label="Neto cliente" value={formatMoney(monthlyClientNet)} />
-                      <MetricCard label="Comision total" value={formatMoney(collaboratorReportQuery.data.totalCommissionAmount)} />
-                      <MetricCard label="Ticket promedio" value={formatMoney(monthlyAverageTicket)} />
-                      <MetricCard label="Producto mas vendido" value={monthlyBestProduct} />
-                    </div>
+                    <FinancialSummaryPanel
+                      totalAmount={collaboratorReportQuery.data.totalAmount}
+                      clientNetAmount={monthlyClientNet}
+                      clientIvaAmount={collaboratorReportQuery.data.totalIvaAmount}
+                      commissionAmount={collaboratorReportQuery.data.totalCommissionAmount}
+                      payoutAmount={collaboratorReportQuery.data.totalNetAmount}
+                    />
 
                     {collaboratorReportQuery.data.entries.length === 0 ? (
                       <EmptyState
@@ -302,13 +309,15 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                               <th>Producto</th>
                               <th>Cantidad</th>
                               <th>Precio</th>
-                              <th>Promocion</th>
-                              <th>UF</th>
-                              <th>Comision fija</th>
-                              <th>Comision variable</th>
-                              <th>IVA comision</th>
-                              <th>Total Tienda</th>
+                              <th>Promoción</th>
                               <th>Total cliente</th>
+                              <th>Neto cliente</th>
+                              <th>IVA cliente</th>
+                              <th>UF</th>
+                              <th>Comisión fija</th>
+                              <th>Comisión variable</th>
+                              <th>IVA comisión</th>
+                              <th>Total a recibir</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -325,12 +334,14 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                                 <td>{entry.quantity}</td>
                                 <td>{formatMoney(entry.unitPrice)}</td>
                                 <td>{entry.promotionLabel}</td>
+                                <td>{formatMoney(entry.totalAmount)}</td>
+                                <td>{formatMoney(resolveClientNet(entry.totalAmount))}</td>
+                                <td>{formatMoney(resolveClientIva(entry.totalAmount))}</td>
                                 <td>{entry.ufValue ? formatDecimal(entry.ufValue) : "-"}</td>
                                 <td>{formatMoney(entry.fixedCommissionAmount)}</td>
                                 <td>{formatMoney(entry.variableCommissionAmount)}</td>
                                 <td>{formatMoney(entry.commissionIvaAmount)}</td>
                                 <td>{formatMoney(entry.netAmount)}</td>
-                                <td>{formatMoney(entry.totalAmount)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -378,7 +389,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                               <th>Producto</th>
                               <th>Unidades</th>
                               <th>Monto</th>
-                              <th>Neto</th>
+                              <th>Total a recibir</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -448,7 +459,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                 <div>
                   <h2 className="text-lg font-semibold">Reporte por tienda</h2>
                   <p className="text-sm text-muted-foreground">
-                    Filtra una Tienda y un rango de fechas para revisar ventas, comisiones, neto e IVA acumulado.
+                    Filtra una Tienda y un rango de fechas para revisar ventas, comisiones, IVA y total a recibir.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -579,20 +590,20 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                 </div>
               ) : collaboratorReportQuery.data ? (
                 <div className="mt-5 space-y-5">
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <MetricCard label="Ventas del periodo" value={String(monthlySaleCount)} />
                     <MetricCard label="Unidades vendidas" value={String(monthlyUnitsSold)} />
-                    <MetricCard label="Total del periodo" value={formatMoney(collaboratorReportQuery.data.totalAmount)} />
-                    <MetricCard label="IVA del periodo" value={formatMoney(collaboratorReportQuery.data.totalIvaAmount)} />
-                    <MetricCard label="Neto Tienda" value={formatMoney(collaboratorReportQuery.data.totalNetAmount)} />
+                    <MetricCard label="Ticket promedio" value={formatMoney(monthlyAverageTicket)} />
+                    <MetricCard label="Producto más vendido" value={monthlyBestProduct} />
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <MetricCard label="Neto cliente" value={formatMoney(monthlyClientNet)} />
-                    <MetricCard label="Comision total" value={formatMoney(collaboratorReportQuery.data.totalCommissionAmount)} />
-                    <MetricCard label="Ticket promedio" value={formatMoney(monthlyAverageTicket)} />
-                    <MetricCard label="Producto mas vendido" value={monthlyBestProduct} />
-                  </div>
+                  <FinancialSummaryPanel
+                    totalAmount={collaboratorReportQuery.data.totalAmount}
+                    clientNetAmount={monthlyClientNet}
+                    clientIvaAmount={collaboratorReportQuery.data.totalIvaAmount}
+                    commissionAmount={collaboratorReportQuery.data.totalCommissionAmount}
+                    payoutAmount={collaboratorReportQuery.data.totalNetAmount}
+                  />
 
                   <div className="rounded-[24px] border border-white/85 bg-white/65 p-5 shadow-sm">
                     <h3 className="text-base font-semibold">{collaboratorReportQuery.data.collaboratorName}</h3>
@@ -617,13 +628,15 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                               <th>Producto</th>
                               <th>Cantidad</th>
                               <th>Precio</th>
-                              <th>Promocion</th>
-                              <th>UF</th>
-                              <th>Comision fija</th>
-                              <th>Comision variable</th>
-                              <th>IVA comision</th>
-                              <th>Total Tienda</th>
+                              <th>Promoción</th>
                               <th>Total cliente</th>
+                              <th>Neto cliente</th>
+                              <th>IVA cliente</th>
+                              <th>UF</th>
+                              <th>Comisión fija</th>
+                              <th>Comisión variable</th>
+                              <th>IVA comisión</th>
+                              <th>Total a recibir</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -640,12 +653,14 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                                 <td>{entry.quantity}</td>
                                 <td>{formatMoney(entry.unitPrice)}</td>
                                 <td>{entry.promotionLabel}</td>
+                                <td>{formatMoney(entry.totalAmount)}</td>
+                                <td>{formatMoney(resolveClientNet(entry.totalAmount))}</td>
+                                <td>{formatMoney(resolveClientIva(entry.totalAmount))}</td>
                                 <td>{entry.ufValue ? formatDecimal(entry.ufValue) : "-"}</td>
                                 <td>{formatMoney(entry.fixedCommissionAmount)}</td>
                                 <td>{formatMoney(entry.variableCommissionAmount)}</td>
                                 <td>{formatMoney(entry.commissionIvaAmount)}</td>
                                 <td>{formatMoney(entry.netAmount)}</td>
-                                <td>{formatMoney(entry.totalAmount)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -705,8 +720,8 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                           <th>Espacio</th>
                           <th>Ventas</th>
                           <th>Monto</th>
-                          <th>Comision</th>
-                          <th>Neto</th>
+                          <th>Comisión</th>
+                          <th>Total a recibir</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -750,8 +765,8 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                           </div>
                           <div className="grid gap-1 text-sm md:text-right">
                             <span>Total: {formatMoney(sale.totalAmount)}</span>
-                            <span>Comision: {formatMoney(sale.totalCommissionAmount)}</span>
-                            <span>Neto: {formatMoney(sale.totalNetAmount)}</span>
+                            <span>Comisión: {formatMoney(sale.totalCommissionAmount)}</span>
+                            <span>Total a recibir: {formatMoney(sale.totalNetAmount)}</span>
                           </div>
                         </div>
 
@@ -764,8 +779,8 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                                   <th>Lineas</th>
                                   <th>Unidades</th>
                                   <th>Subtotal</th>
-                                  <th>Comision</th>
-                                  <th>Neto</th>
+                                  <th>Comisión</th>
+                                  <th>Total a recibir</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -794,7 +809,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                                   <th>Espacio</th>
                                   <th>Cant.</th>
                                   <th>Subtotal</th>
-                                  <th>Neto</th>
+                                  <th>Total a recibir</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -830,6 +845,67 @@ function MetricCard({ label, value }: { label: string; value: string }) {
     <div className="soft-surface p-5">
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
+    </div>
+  );
+}
+
+function FinancialSummaryPanel({
+  totalAmount,
+  clientNetAmount,
+  clientIvaAmount,
+  commissionAmount,
+  payoutAmount,
+}: {
+  totalAmount: number;
+  clientNetAmount: number;
+  clientIvaAmount: number;
+  commissionAmount: number;
+  payoutAmount: number;
+}) {
+  return (
+    <div className="rounded-[30px] border border-white/85 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(255,247,252,0.92))] p-5 shadow-[0_18px_42px_rgba(186,170,211,0.12)]">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">Resumen financiero</p>
+          <h3 className="mt-2 text-lg font-semibold text-foreground">Cuánto vendió, cuánto se descuenta y cuánto recibe</h3>
+        </div>
+        <p className="max-w-xl text-sm text-muted-foreground">
+          El <span className="font-semibold text-foreground">Total a recibir</span> corresponde al total vendido menos las comisiones del Espacio.
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <SummaryValue label="Total cobrado al cliente" value={formatMoney(totalAmount)} tone="client" />
+        <SummaryValue label="Neto cliente sin IVA" value={formatMoney(clientNetAmount)} tone="neutral" />
+        <SummaryValue label="IVA pagado por cliente" value={formatMoney(clientIvaAmount)} tone="iva" />
+        <SummaryValue label="Comisiones del Espacio" value={formatMoney(commissionAmount)} tone="commission" />
+        <SummaryValue label="Total a recibir" value={formatMoney(payoutAmount)} tone="payout" />
+      </div>
+    </div>
+  );
+}
+
+function SummaryValue({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "client" | "neutral" | "iva" | "commission" | "payout";
+}) {
+  const toneClasses = {
+    client: "bg-violet-50/80 text-violet-900",
+    neutral: "bg-slate-50/90 text-slate-900",
+    iva: "bg-sky-50/85 text-sky-900",
+    commission: "bg-amber-50/85 text-amber-900",
+    payout: "bg-emerald-50/90 text-emerald-900 ring-1 ring-emerald-100",
+  }[tone];
+
+  return (
+    <div className={["rounded-[22px] border border-white/85 p-4 shadow-sm", toneClasses].join(" ")}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">{label}</p>
+      <p className="mt-3 text-2xl font-black tracking-tight">{value}</p>
     </div>
   );
 }
@@ -908,6 +984,16 @@ function resolveItemAmount(item: {
   }
 
   return toSafeNumber(item.netAmount) + toSafeNumber(item.totalCommissionAmount);
+}
+
+function resolveClientIva(totalAmount: number) {
+  const safeAmount = toSafeNumber(totalAmount);
+  return safeAmount - resolveClientNet(safeAmount);
+}
+
+function resolveClientNet(totalAmount: number) {
+  const safeAmount = toSafeNumber(totalAmount);
+  return safeAmount / 1.19;
 }
 
 function toSafeNumber(value: unknown) {
@@ -1004,13 +1090,15 @@ function buildCollaboratorReportRows(report: CollaboratorSalesReport) {
     cantidad: entry.quantity,
     precio: entry.unitPrice,
     promocion: entry.promotionLabel,
+    total_cliente: entry.totalAmount,
+    neto_cliente_sin_iva: resolveClientNet(entry.totalAmount),
+    iva_cliente: resolveClientIva(entry.totalAmount),
     uf: entry.ufValue,
     comision_fija: entry.fixedCommissionAmount,
     comision_variable: entry.variableCommissionAmount,
     iva_comision: entry.commissionIvaAmount,
-    total_cliente: entry.totalAmount,
     comision_total: entry.commissionAmount,
-    neto_tienda: entry.netAmount,
+    total_a_recibir: entry.netAmount,
   }));
 }
 

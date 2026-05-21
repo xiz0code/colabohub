@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600">
+  <rect width="900" height="600" fill="#f7f4fb"/>
+  <text x="60" y="70" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#2c2238">
+    Mockup etiqueta térmica 30 x 20 mm
+  </text>
+  <text x="60" y="108" font-family="Arial, sans-serif" font-size="18" fill="#6a5d7c">
+    Propuesta compacta: precio grande + Code128 + número legible
+  </text>
+
+  <g transform="translate(150 170)">
+    <rect x="0" y="0" width="450" height="300" rx="20" fill="#ffffff" stroke="#d8cde7" stroke-width="4"/>
+    <text x="28" y="58" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#1f1728">
+      $12.000
+    </text>
+
+    <g transform="translate(30 95)">
+      <rect x="0" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="8" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="14" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="24" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="30" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="40" y="0" width="8" height="110" fill="#24182f"/>
+      <rect x="52" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="58" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="68" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="74" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="86" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="96" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="104" y="0" width="8" height="110" fill="#24182f"/>
+      <rect x="118" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="128" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="134" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="146" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="152" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="162" y="0" width="8" height="110" fill="#24182f"/>
+      <rect x="174" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="180" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="192" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="202" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="210" y="0" width="8" height="110" fill="#24182f"/>
+      <rect x="224" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="232" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="242" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="252" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="260" y="0" width="8" height="110" fill="#24182f"/>
+      <rect x="274" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="284" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="292" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="304" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="312" y="0" width="8" height="110" fill="#24182f"/>
+      <rect x="326" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="336" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="344" y="0" width="6" height="110" fill="#24182f"/>
+      <rect x="356" y="0" width="4" height="110" fill="#24182f"/>
+      <rect x="366" y="0" width="2" height="110" fill="#24182f"/>
+      <rect x="374" y="0" width="8" height="110" fill="#24182f"/>
+    </g>
+
+    <text x="30" y="250" font-family="Arial, sans-serif" font-size="24" letter-spacing="1.5" fill="#433453">
+      7502434257164
+    </text>
+  </g>
+
+  <g transform="translate(650 210)">
+    <text x="0" y="0" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#2c2238">
+      Qué incluiría
+    </text>
+    <text x="0" y="42" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Precio destacado
+    </text>
+    <text x="0" y="76" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Código de barras centrado
+    </text>
+    <text x="0" y="110" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Número debajo para lectura manual
+    </text>
+    <text x="0" y="164" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#2c2238">
+      Qué quitaría
+    </text>
+    <text x="0" y="206" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Nombre del producto
+    </text>
+    <text x="0" y="240" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Nombre de la tienda
+    </text>
+    <text x="0" y="274" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Texto extra
+    </text>
+  </g>
+</svg>

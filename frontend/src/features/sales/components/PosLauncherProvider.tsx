@@ -8,9 +8,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
+import { checkoutPickupByCode } from "@/features/pickups/api/pickupsApi";
 import {
   addPosSaleItem,
   cancelPosSale,
@@ -26,6 +27,7 @@ import {
   type PosSale,
   type PosSaleSummary,
 } from "@/features/sales/api/posApi";
+import { listUsers } from "@/features/users/api/userApi";
 import { EmptyState } from "@/shared/components/feedback/EmptyState";
 import { FeedbackMessage } from "@/shared/components/feedback/FeedbackMessage";
 import { Modal } from "@/shared/components/ui/Modal";
@@ -57,10 +59,36 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
   const [isPosCloseConfirmOpen, setIsPosCloseConfirmOpen] = useState(false);
   const [amountReceived, setAmountReceived] = useState("");
   const [isSearchingProducts, setIsSearchingProducts] = useState(false);
+  const [selectedSearchOwnerId, setSelectedSearchOwnerId] = useState("");
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
+  const totalCardRef = useRef<HTMLDivElement | null>(null);
+  const previousCartSignatureRef = useRef("");
 
   const activeMarketName = user?.activeMarketName ?? "tu Espacio";
   const canOperatePos = (primaryRole === "ADMIN_MARKET" || primaryRole === "SELLER") && Boolean(user?.activeMarketId);
+  const canFilterSearchByStore = primaryRole === "ADMIN_MARKET";
+
+  const storeUsersQuery = useQuery({
+    queryKey: ["users", "pos-store-filter", user?.activeMarketId],
+    queryFn: listUsers,
+    enabled: canFilterSearchByStore && Boolean(user?.activeMarketId),
+  });
+
+  const posStoreOptions = useMemo(
+    () =>
+      (storeUsersQuery.data ?? [])
+        .filter((candidate) => {
+          if (!candidate.active || !candidate.roles.includes("STORE_USER")) {
+            return false;
+          }
+          return user?.activeMarketId ? candidate.marketIds.includes(user.activeMarketId) || candidate.storeIds.length > 0 : true;
+        })
+        .map((candidate) => ({ value: String(candidate.id), label: candidate.fullName }))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [storeUsersQuery.data, user?.activeMarketId],
+  );
+
+  const selectedSearchOwnerIdNumber = selectedSearchOwnerId ? Number(selectedSearchOwnerId) : undefined;
 
   const syncSale = (nextSale: PosSale, nextFeedback?: Feedback) => {
     setActiveSale(nextSale);
@@ -126,6 +154,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
     mutationFn: () => confirmPosSale(activeSale!.id),
     onSuccess: (sale) => {
       syncSale(sale, { kind: "success", message: "Venta registrada correctamente" });
+      void queryClient.invalidateQueries({ queryKey: ["pickups"] });
       setIsConfirmModalOpen(false);
       setIsPosModalOpen(false);
     },
@@ -137,6 +166,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
     onSuccess: (sale) => {
       queryClient.setQueryData(["pos", "sales", sale.id], sale);
       void queryClient.invalidateQueries({ queryKey: ["pos", "sales"] });
+      void queryClient.invalidateQueries({ queryKey: ["pickups"] });
       setActiveSale(sale);
       setIsPosCloseConfirmOpen(false);
       setIsPosModalOpen(false);
@@ -213,7 +243,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
     const timeoutId = window.setTimeout(async () => {
       try {
         setIsSearchingProducts(true);
-        const matches = await searchPosProducts(normalizedQuery);
+        const matches = await searchPosProducts(normalizedQuery, { ownerUserId: selectedSearchOwnerIdNumber });
         setSearchResults(matches);
       } catch {
         setSearchResults([]);
@@ -223,7 +253,31 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
     }, 220);
 
     return () => window.clearTimeout(timeoutId);
-  }, [isOpen, isPosModalOpen, search]);
+  }, [isOpen, isPosModalOpen, search, selectedSearchOwnerIdNumber]);
+
+  useEffect(() => {
+    setSearchResults([]);
+  }, [selectedSearchOwnerId]);
+
+  useEffect(() => {
+    if (!isPosModalOpen || !activeSale || activeSale.items.length === 0) {
+      previousCartSignatureRef.current = "";
+      return;
+    }
+
+    const cartSignature = activeSale.items.map((item) => `${item.id}:${item.quantity}`).join("|");
+    if (cartSignature === previousCartSignatureRef.current) {
+      return;
+    }
+    previousCartSignatureRef.current = cartSignature;
+
+    window.requestAnimationFrame(() => {
+      totalCardRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+  }, [activeSale, isPosModalOpen]);
 
   const handleResolveAndAdd = async () => {
     const normalizedQuery = search.trim();
@@ -247,15 +301,28 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
     }
 
     try {
-      const matches = await searchPosProducts(normalizedQuery);
+      const matches = await searchPosProducts(normalizedQuery, { ownerUserId: selectedSearchOwnerIdNumber });
       if (matches.length === 1) {
         handleAddProduct(matches[0]);
         return;
       }
 
       if (matches.length === 0) {
-        setFeedback({ kind: "error", message: "No encontramos productos activos con esa busqueda." });
-        return;
+        try {
+          const pickupCheckout = await checkoutPickupByCode(normalizedQuery);
+          openPosWithSale(pickupCheckout.sale);
+          setFeedback({
+            kind: "success",
+            message: `Retiro ${pickupCheckout.pickup.pickupNumber} cargado en el POS. Puedes cobrarlo o sumar mas productos.`,
+          });
+          return;
+        } catch (pickupError) {
+          setFeedback({
+            kind: "error",
+            message: getErrorMessage(pickupError, "No encontramos productos activos ni retiros por cobrar con esa busqueda."),
+          });
+          return;
+        }
       }
 
       setSearchResults(matches);
@@ -271,7 +338,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    if (activeSale.status !== "OPEN" || activeSale.items.length === 0) {
+    if (activeSale.status !== "OPEN") {
       setIsPosModalOpen(false);
       return;
     }
@@ -340,6 +407,28 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
                     />
                   ) : null}
 
+                  {canFilterSearchByStore ? (
+                    <label className="grid gap-2 text-sm">
+                      <span className="font-medium text-foreground">Filtrar búsqueda por Tienda</span>
+                      <select
+                        value={selectedSearchOwnerId}
+                        disabled={!isOpen || storeUsersQuery.isLoading}
+                        onChange={(event) => setSelectedSearchOwnerId(event.target.value)}
+                        className="rounded-2xl border border-input bg-background px-4 py-3"
+                      >
+                        <option value="">Todas las Tiendas</option>
+                        {posStoreOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-xs text-muted-foreground">
+                        Úsalo cuando busques por nombre y quieras evitar productos parecidos de otras Tiendas.
+                      </span>
+                    </label>
+                  ) : null}
+
                   <label className="grid gap-2 text-sm">
                     <span className="font-medium text-foreground">Escanear o buscar producto</span>
                     <div className="flex gap-2">
@@ -360,7 +449,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
                           }
                         }}
                         className="flex-1 rounded-2xl border border-input bg-background px-4 py-3"
-                        placeholder="Busca por nombre, SKU o codigo de barras"
+                        placeholder="Busca por nombre, SKU o codigo del producto"
                       />
                       <button
                         type="button"
@@ -374,8 +463,8 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
                   </label>
 
                   <div className="rounded-[24px] border border-dashed border-violet-200/80 bg-violet-50/40 px-4 py-3 text-sm text-muted-foreground">
-                    El lector esta listo para trabajar con codigo de barras, SKU o nombre. Presiona Enter para agregar el
-                    primer resultado.
+                    El lector esta listo para trabajar con codigo del producto, SKU, nombre o codigo de retiro. Presiona
+                    Enter para agregar el primer resultado o cargar un retiro por pagar.
                   </div>
                 </div>
               </div>
@@ -427,7 +516,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
                   <div className="mt-4">
                     <EmptyState
                       title="Tu caja esta lista para recibir productos"
-                      description="Escribe un nombre, SKU o codigo de barras para comenzar a armar la venta."
+                      description="Escribe un nombre, SKU o codigo del producto para comenzar a armar la venta."
                     />
                   </div>
                 )}
@@ -435,16 +524,6 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
             </div>
 
             <div className="space-y-5">
-              <div className="rounded-[30px] border border-violet-100 bg-[linear-gradient(180deg,rgba(255,248,252,0.98),rgba(246,243,255,0.96))] p-6 shadow-[0_18px_45px_rgba(186,168,223,0.15)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-violet-500">TOTAL A COBRAR</p>
-                <p className="mt-4 text-5xl font-black tracking-tight text-slate-900">{formatMoney(activeSale.totalAmount)}</p>
-                <div className="mt-6 grid gap-2 text-sm">
-                  <BreakdownRow label="Neto" value={formatMoney(activeSale.netAmount)} />
-                  <BreakdownRow label="IVA" value={formatMoney(activeSale.ivaAmount)} />
-                  <BreakdownRow label="Total" value={formatMoney(activeSale.totalAmount)} />
-                </div>
-              </div>
-
               <div className="soft-subtle-surface p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -543,6 +622,19 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div
+                ref={totalCardRef}
+                className="rounded-[30px] border border-violet-100 bg-[linear-gradient(180deg,rgba(255,248,252,0.98),rgba(246,243,255,0.96))] p-6 shadow-[0_18px_45px_rgba(186,168,223,0.15)]"
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-violet-500">TOTAL A COBRAR</p>
+                <p className="mt-4 text-5xl font-black tracking-tight text-slate-900">{formatMoney(activeSale.totalAmount)}</p>
+                <div className="mt-6 grid gap-2 text-sm">
+                  <BreakdownRow label="Neto" value={formatMoney(activeSale.netAmount)} />
+                  <BreakdownRow label="IVA" value={formatMoney(activeSale.ivaAmount)} />
+                  <BreakdownRow label="Total" value={formatMoney(activeSale.totalAmount)} />
+                </div>
               </div>
 
               <div className="soft-subtle-surface space-y-4 p-5">
@@ -650,7 +742,7 @@ export function PosLauncherProvider({ children }: PropsWithChildren) {
         open={isConfirmModalOpen}
         onClose={() => setIsConfirmModalOpen(false)}
         title="Confirmar venta"
-        description="La venta quedara registrada y no se podra editar despues."
+        description="La venta quedara registrada y podras editarla nuevamente despues desde Ventas."
         footer={
           <div className="flex justify-end gap-3">
             <button

@@ -370,7 +370,7 @@ public class PosPricingService {
         if (paymentMethod == PaymentMethod.CASH) {
             return promotion.isAppliesToCash();
         }
-        if (paymentMethod == PaymentMethod.DEBITO) {
+        if (paymentMethod == PaymentMethod.DEBITO || paymentMethod == PaymentMethod.CREDIT) {
             return promotion.isAppliesToDebit();
         }
         return false;
@@ -389,7 +389,7 @@ public class PosPricingService {
 
         item.setProductNameSnapshot(item.getProduct().getName());
         item.setProductSkuSnapshot(item.getProduct().getSku());
-        item.setProductBarcodeSnapshot(item.getProduct().getBarcode());
+        item.setProductBarcodeSnapshot(item.getProduct().getShortBarcode() != null ? item.getProduct().getShortBarcode() : item.getProduct().getBarcode());
         item.setStore(item.getProduct().getStore());
         item.setBaseUnitPrice(computation.baseUnitPrice());
         item.setLineBaseSubtotal(computation.baseSubtotal());
@@ -560,7 +560,7 @@ public class PosPricingService {
     }
 
     private boolean appliesDebitCommissions(PaymentMethod paymentMethod) {
-        return paymentMethod == PaymentMethod.DEBITO;
+        return paymentMethod == PaymentMethod.DEBITO || paymentMethod == PaymentMethod.CREDIT;
     }
 
     private CollaboratorKey resolveCollaboratorKey(SaleItem item) {

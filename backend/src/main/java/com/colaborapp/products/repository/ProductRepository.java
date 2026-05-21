@@ -59,11 +59,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsByBarcode(String barcode);
 
+    boolean existsByShortBarcode(String shortBarcode);
+
     boolean existsByStoreIdAndSkuIgnoreCase(Long storeId, String sku);
 
     boolean existsByStoreIdAndSkuIgnoreCaseAndIdNot(Long storeId, String sku, Long id);
 
     boolean existsByOwnerUserIdAndNameIgnoreCaseAndStatus(Long ownerUserId, String name, ProductStatus status);
+
+    Optional<Product> findByOwnerUserIdAndNameIgnoreCaseAndStatus(Long ownerUserId, String name, ProductStatus status);
 
     @Query("""
             select p from Product p
@@ -71,7 +75,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             left join fetch p.ownerUser owner
             where p.tenant.id = :tenantId
               and p.status = :status
-              and p.barcode = :barcode
+              and (p.shortBarcode = :barcode or p.barcode = :barcode)
             """)
     Optional<Product> findByBarcodeForPos(
             @Param("tenantId") Long tenantId,
@@ -113,15 +117,17 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             where p.tenant.id = :tenantId
               and p.status = :status
               and (
-                  lower(p.barcode) like :query
+                  lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
             order by
               case
-                when lower(p.barcode) = :exactQuery then 0
-                when lower(p.sku) = :exactQuery then 1
-                else 2
+                when lower(p.shortBarcode) = :exactQuery then 0
+                when lower(coalesce(p.barcode, '')) = :exactQuery then 1
+                when lower(p.sku) = :exactQuery then 2
+                else 3
               end,
               p.name asc
             """)
@@ -155,7 +161,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -168,7 +175,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -193,7 +201,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -207,7 +216,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -231,7 +241,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -244,7 +255,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -268,7 +280,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -281,7 +294,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               and (:status is null or p.status = :status)
               and (
                   :query is null
-                  or lower(p.barcode) like :query
+                  or lower(p.shortBarcode) like :query
+                  or lower(coalesce(p.barcode, '')) like :query
                   or lower(p.sku) like :query
                   or lower(p.name) like :query
               )
@@ -304,4 +318,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     java.util.List<Store> findDistinctStoresByTenantIdAndOwnerUserId(
             @Param("tenantId") Long tenantId,
             @Param("ownerUserId") Long ownerUserId);
+
+    @Query(value = "select nextval('product_short_barcode_seq')", nativeQuery = true)
+    Long nextShortBarcodeSequenceValue();
 }

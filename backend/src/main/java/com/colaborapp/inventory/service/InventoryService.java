@@ -35,12 +35,21 @@ public class InventoryService {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         Product product = getProductEntity(request.productId(), tenantId);
         requireProductInventoryWriteAccess(product);
-        if (request.quantityDelta() == 0) {
+        return applyAdjustment(product, request.quantityDelta(), request.reason().trim(), product.getId());
+    }
+
+    @Transactional
+    public StockMovementResponse addStock(Product product, int quantityDelta, String reason) {
+        return applyAdjustment(product, quantityDelta, reason, product.getId());
+    }
+
+    private StockMovementResponse applyAdjustment(Product product, int quantityDelta, String reason, Long referenceId) {
+        if (quantityDelta == 0) {
             throw new BusinessException("La cantidad de ajuste debe ser distinta de 0.");
         }
 
         int previousStock = product.getStock();
-        int newStock = previousStock + request.quantityDelta();
+        int newStock = previousStock + quantityDelta;
 
         if (newStock < 0) {
             throw new BusinessException("La reduccion solicitada dejaria el stock en negativo.");
@@ -51,11 +60,11 @@ public class InventoryService {
 
         StockMovement movement = createMovement(
                 product,
-                request.quantityDelta(),
+                quantityDelta,
                 previousStock,
                 newStock,
-                request.reason().trim(),
-                product.getId());
+                reason,
+                referenceId);
 
         return toResponse(stockMovementRepository.save(movement));
     }

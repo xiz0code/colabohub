@@ -9,4 +9,6 @@ import com.colaborapp.closings.domain.MonthlyClosingCollaborator;
 public interface MonthlyClosingCollaboratorRepository extends JpaRepository<MonthlyClosingCollaborator, Long> {
 
     List<MonthlyClosingCollaborator> findByMonthlyClosingIdOrderByCollaboratorNameSnapshotAsc(Long monthlyClosingId);
+
+    void deleteByMonthlyClosingId(Long monthlyClosingId);
 }

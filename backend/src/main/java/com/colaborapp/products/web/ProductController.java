@@ -36,6 +36,7 @@ import com.colaborapp.products.web.dto.ProductListQuery;
 import com.colaborapp.products.web.dto.ProductPromotionGroupRequest;
 import com.colaborapp.products.web.dto.ProductPromotionGroupResponse;
 import com.colaborapp.products.web.dto.ProductResponse;
+import com.colaborapp.products.web.dto.ProductStockIncreaseRequest;
 import com.colaborapp.products.web.dto.ProductStatusUpdateRequest;
 import com.colaborapp.products.web.dto.ProductUpdateRequest;
 
@@ -125,6 +126,12 @@ public class ProductController {
     @PreAuthorize("@accessControl.canManageCatalog()")
     public ProductResponse updateStatus(@PathVariable Long productId, @Valid @RequestBody ProductStatusUpdateRequest request) {
         return productService.updateStatus(productId, request.status());
+    }
+
+    @PostMapping("/{productId}/stock/increase")
+    @PreAuthorize("@accessControl.canAdjustCatalogStock()")
+    public ProductResponse increaseStock(@PathVariable Long productId, @Valid @RequestBody ProductStockIncreaseRequest request) {
+        return productService.increaseStock(productId, request.quantity());
     }
 
     @GetMapping("/{productId}/stock-movements")

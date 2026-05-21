@@ -59,6 +59,12 @@ public class Pickup extends BaseEntity {
     @Column(precision = 19, scale = 4)
     private BigDecimal amountDue;
 
+    @Column
+    private Long collaboratorUserId;
+
+    @Column(length = 180)
+    private String collaboratorNameSnapshot;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private PickupStatus status;

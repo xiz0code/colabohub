@@ -41,6 +41,14 @@ public class DailyClosingController {
         return dailyClosingService.getClosing(marketId, date);
     }
 
+    @GetMapping("/daily/preview")
+    @PreAuthorize("@accessControl.canAccessMarket(#marketId)")
+    public DailyClosingResponse previewDaily(
+            @PathVariable Long marketId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return dailyClosingService.previewDay(marketId, date);
+    }
+
     private String resolveActor(Authentication authentication) {
         return authentication == null || authentication.getName() == null || authentication.getName().isBlank()
                 ? "system"

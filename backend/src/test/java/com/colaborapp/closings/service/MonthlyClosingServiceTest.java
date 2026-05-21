@@ -94,7 +94,8 @@ class MonthlyClosingServiceTest {
                                 5,
                                 new BigDecimal("12000.0000"),
                                 new BigDecimal("600.0000"),
-                                new BigDecimal("11400.0000"))))));
+                                new BigDecimal("11400.0000"))),
+                        List.of())));
         when(monthlyClosingRepository.save(any(MonthlyClosing.class))).thenAnswer(invocation -> {
             MonthlyClosing closing = invocation.getArgument(0);
             closing.setId(70L);

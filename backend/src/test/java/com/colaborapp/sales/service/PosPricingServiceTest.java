@@ -95,6 +95,24 @@ class PosPricingServiceTest {
     }
 
     @Test
+    void shouldApplySameCommissionsForCreditAsDebito() {
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
+
+        SaleItem item = saleItem(product(105L, storeAna, collaboratorAna, "Producto Credito", new BigDecimal("10000.00")), 1);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(item),
+                PaymentMethod.CREDIT,
+                new BigDecimal("40000.00"));
+
+        assertThat(result.totalCommissionAmount()).isEqualByComparingTo("175");
+        assertThat(item.getCommission1Amount()).isEqualByComparingTo("68");
+        assertThat(item.getCommission2Amount()).isEqualByComparingTo("79");
+        assertThat(item.getCommissionIvaAmount()).isEqualByComparingTo("28");
+        assertThat(item.getNetAmount()).isEqualByComparingTo("9825.00");
+    }
+
+    @Test
     void shouldLeaveCommissionsInZeroForNonDebito() {
         when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of());
 
@@ -227,6 +245,12 @@ class PosPricingServiceTest {
 
         assertThat(debitItem.getLineBaseSubtotal()).isEqualByComparingTo("10000.00");
         assertThat(debitItem.getPromotionDiscountAmount()).isEqualByComparingTo("0.00");
+
+        SaleItem creditItem = saleItem(product, 1);
+        posPricingService.calculateSalePricing(List.of(creditItem), PaymentMethod.CREDIT, new BigDecimal("39053.25"));
+
+        assertThat(creditItem.getLineBaseSubtotal()).isEqualByComparingTo("10000.00");
+        assertThat(creditItem.getPromotionDiscountAmount()).isEqualByComparingTo("0.00");
     }
 
     @Test

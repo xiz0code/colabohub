@@ -23,6 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.colaborapp.common.exception.BusinessException;
+import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.products.web.dto.ProductCreateRequest;
@@ -109,7 +110,9 @@ public class ProductImportService {
                 try {
                     ProductCreateRequest request = buildRequest(row);
                     Boolean created = transactionTemplate.execute(status -> {
-                        productService.createProduct(request);
+                        if (request != null) {
+                            productService.createProduct(request);
+                        }
                         return Boolean.TRUE;
                     });
                     if (Boolean.TRUE.equals(created)) {
@@ -188,8 +191,23 @@ public class ProductImportService {
         BigDecimal price = parsePrice(row.price());
         Integer stock = parseStock(row.stock());
         User collaborator = resolveCollaborator(row.collaboratorEmail());
-        ensureProductDoesNotExistForCollaborator(name, collaborator);
         ProductPromotionRequest promotion = parsePromotion(row.promotionType(), row.promotionValue(), row.promotionEndDate());
+        Product existingProduct = productRepository.findByOwnerUserIdAndNameIgnoreCaseAndStatus(
+                        collaborator.getId(),
+                        name.trim(),
+                        ProductStatus.ACTIVE)
+                .orElse(null);
+
+        if (existingProduct != null) {
+            productService.mergeImportedProduct(
+                    existingProduct.getId(),
+                    price,
+                    stock,
+                    row.description(),
+                    row.promotionGroupName(),
+                    promotion);
+            return null;
+        }
 
         return new ProductCreateRequest(
                 null,
@@ -219,16 +237,6 @@ public class ProductImportService {
         }
 
         return collaborator;
-    }
-
-    private void ensureProductDoesNotExistForCollaborator(String name, User collaborator) {
-        boolean exists = productRepository.existsByOwnerUserIdAndNameIgnoreCaseAndStatus(
-                collaborator.getId(),
-                name.trim(),
-                ProductStatus.ACTIVE);
-        if (exists) {
-            throw new BusinessException("Producto ya existe para esta Tienda. No se duplico.");
-        }
     }
 
     private ProductPromotionRequest parsePromotion(String typeValue, String value, String endDateValue) {

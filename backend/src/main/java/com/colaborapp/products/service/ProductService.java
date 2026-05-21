@@ -147,9 +147,10 @@ public class ProductService {
         product.setCost(request.cost());
         product.setStock(request.initialStock());
         product.setStatus(ProductStatus.ACTIVE);
-        String barcode = barcodeGenerator.generateUniqueBarcode();
-        ensureUniqueBarcode(barcode);
-        product.setBarcode(barcode);
+        String shortBarcode = barcodeGenerator.generateUniqueBarcode();
+        ensureUniqueShortBarcode(shortBarcode);
+        product.setShortBarcode(shortBarcode);
+        product.setBarcode(null);
 
         Product savedProduct = productRepository.save(product);
         syncPromotion(savedProduct, request.promotion());
@@ -260,6 +261,63 @@ public class ProductService {
         return toResponse(product);
     }
 
+    @Transactional
+    public ProductResponse increaseStock(Long productId, Integer quantity) {
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        Product product = getProductEntity(productId, tenantId);
+        accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR, RoleCode.STORE_USER);
+        requireProductManagementAccess(product);
+        if (quantity == null || quantity <= 0) {
+            throw new BusinessException("La cantidad a agregar debe ser mayor a 0.");
+        }
+
+        int previousStock = product.getStock();
+        inventoryService.addStock(product, quantity, "AUMENTO_MANUAL");
+        productAuditService.logChange(product, "Stock agregado", previousStock, previousStock + quantity);
+        return toResponse(productRepository.findByIdAndTenantId(productId, tenantId).orElse(product));
+    }
+
+    @Transactional
+    public ProductResponse mergeImportedProduct(
+            Long productId,
+            BigDecimal salePrice,
+            Integer stockToAdd,
+            String description,
+            String promotionGroupName,
+            ProductPromotionRequest promotionRequest) {
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        Product product = getProductEntity(productId, tenantId);
+
+        BigDecimal previousPrice = product.getSalePrice();
+        Integer previousStock = product.getStock();
+        String previousDescription = product.getDescription();
+        String previousPromotionGroup = product.getPromotionGroup() != null ? product.getPromotionGroup().getName() : null;
+        String previousPromotion = describePromotion(productPromotionRepository.findFirstByProductIdOrderByIdAsc(product.getId()).orElse(null));
+
+        product.setSalePrice(salePrice);
+        product.setDescription(trimToNull(description));
+        product.setPromotionGroup(resolvePromotionGroup(
+                product.getStore(),
+                product.getOwnerUser(),
+                null,
+                promotionGroupName));
+        productRepository.save(product);
+
+        if (stockToAdd != null && stockToAdd > 0) {
+            inventoryService.addStock(product, stockToAdd, "IMPORTACION_MASIVA_CSV");
+        }
+
+        syncPromotion(product, promotionRequest);
+
+        productAuditService.logChange(product, "Precio", previousPrice, product.getSalePrice());
+        productAuditService.logChange(product, "Descripcion", previousDescription, product.getDescription());
+        productAuditService.logChange(product, "Stock agregado", previousStock, previousStock + (stockToAdd == null ? 0 : stockToAdd));
+        productAuditService.logChange(product, "Grupo promocional", previousPromotionGroup, product.getPromotionGroup() != null ? product.getPromotionGroup().getName() : null);
+        productAuditService.logChange(product, "Promocion", previousPromotion, describePromotion(promotionRequest));
+
+        return toResponse(productRepository.findByIdAndTenantId(productId, tenantId).orElse(product));
+    }
+
     @Transactional(readOnly = true)
     public Product getProductEntity(Long productId, Long tenantId) {
         return productRepository.findByIdAndTenantId(productId, tenantId)
@@ -345,9 +403,9 @@ public class ProductService {
         }
     }
 
-    private void ensureUniqueBarcode(String barcode) {
-        if (productRepository.existsByBarcode(barcode)) {
-            throw new BusinessException("No pudimos generar un codigo de barras unico. Intenta nuevamente.");
+    private void ensureUniqueShortBarcode(String shortBarcode) {
+        if (productRepository.existsByShortBarcode(shortBarcode)) {
+            throw new BusinessException("No pudimos generar un codigo corto unico. Intenta nuevamente.");
         }
     }
 
@@ -380,6 +438,7 @@ public class ProductService {
         ProductPromotionResponse promotion = findActivePromotion(product.getId())
                 .map(this::toPromotionResponse)
                 .orElse(null);
+        String displayBarcode = product.getShortBarcode() != null ? product.getShortBarcode() : product.getBarcode();
         return new ProductResponse(
                 product.getId(),
                 product.getStore().getId(),
@@ -395,7 +454,7 @@ public class ProductService {
                 product.getCost(),
                 product.getStock(),
                 product.getStatus(),
-                product.getBarcode(),
+                displayBarcode,
                 promotion != null,
                 promotion,
                 product.getCreatedAt(),

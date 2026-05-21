@@ -29,7 +29,10 @@ public class PosProductController {
     }
 
     @GetMapping("/search")
-    public List<PosProductResponse> search(@RequestParam("q") @NotBlank String query) {
-        return posProductLookupService.search(query);
+    public List<PosProductResponse> search(
+            @RequestParam("q") @NotBlank String query,
+            @RequestParam(required = false) Long ownerUserId,
+            @RequestParam(defaultValue = "30") int size) {
+        return posProductLookupService.search(query, ownerUserId, size);
     }
 }

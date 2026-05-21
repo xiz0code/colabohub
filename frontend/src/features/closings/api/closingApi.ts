@@ -18,8 +18,8 @@ export type DailyClosing = {
   totalSalesAmount: number;
   totalCommissionAmount: number;
   totalNetAmount: number;
-  closedAt: string;
-  closedBy: string;
+  closedAt: string | null;
+  closedBy: string | null;
   stores: DailyClosingStore[];
 };
 
@@ -47,8 +47,8 @@ export type MonthlyClosing = {
   totalNetAmount: number;
   totalIvaAmount: number;
   totalIvaToPayAmount: number;
-  closedAt: string;
-  closedBy: string;
+  closedAt: string | null;
+  closedBy: string | null;
   collaborators: MonthlyClosingCollaborator[];
 };
 
@@ -68,6 +68,16 @@ export function getDailyClosing(marketId: number, date: string) {
   return apiFetch<DailyClosing>(`/api/markets/${marketId}/closings/${date}`);
 }
 
+export function previewDailyClosing(marketId: number, date?: string) {
+  const search = new URLSearchParams();
+  if (date) {
+    search.set("date", date);
+  }
+
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return apiFetch<DailyClosing>(`/api/markets/${marketId}/closings/daily/preview${suffix}`);
+}
+
 export function closeMonthly(marketId: number, month?: string) {
   const search = new URLSearchParams();
   if (month) {
@@ -82,4 +92,14 @@ export function closeMonthly(marketId: number, month?: string) {
 
 export function getMonthlyClosing(marketId: number, month: string) {
   return apiFetch<MonthlyClosing>(`/api/markets/${marketId}/closings/monthly/${month}`);
+}
+
+export function previewMonthlyClosing(marketId: number, month?: string) {
+  const search = new URLSearchParams();
+  if (month) {
+    search.set("month", month);
+  }
+
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return apiFetch<MonthlyClosing>(`/api/markets/${marketId}/closings/monthly/preview${suffix}`);
 }

@@ -60,5 +60,7 @@ app:
         enabled: ${APP_SECURITY_RATE_LIMIT_POS_ENABLED:false}
         max-requests: ${APP_SECURITY_RATE_LIMIT_POS_MAX_REQUESTS:45}
         window-seconds: ${APP_SECURITY_RATE_LIMIT_POS_WINDOW_SECONDS:60}
+    session:
+      extended-timeout-seconds: ${APP_SECURITY_SESSION_EXTENDED_TIMEOUT_SECONDS:2592000}
   auth:
     bootstrap-admin-email: ${APP_AUTH_BOOTSTRAP_ADMIN_EMAIL:}

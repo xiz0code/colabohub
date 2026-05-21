@@ -41,6 +41,14 @@ public class MonthlyClosingController {
         return monthlyClosingService.getClosing(marketId, month);
     }
 
+    @GetMapping("/monthly/preview")
+    @PreAuthorize("@accessControl.canAccessMarket(#marketId)")
+    public MonthlyClosingResponse previewMonthly(
+            @PathVariable Long marketId,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
+        return monthlyClosingService.previewMonth(marketId, month);
+    }
+
     private String resolveActor(Authentication authentication) {
         return authentication == null || authentication.getName() == null || authentication.getName().isBlank()
                 ? "system"

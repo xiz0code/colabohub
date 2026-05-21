@@ -3,7 +3,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
-import { closeDaily, closeMonthly, getDailyClosing, getMonthlyClosing, type DailyClosing, type MonthlyClosing } from "@/features/closings/api/closingApi";
+import {
+  closeDaily,
+  closeMonthly,
+  previewDailyClosing,
+  previewMonthlyClosing,
+  type DailyClosing,
+  type MonthlyClosing,
+} from "@/features/closings/api/closingApi";
 import { listMarkets } from "@/features/markets/api/marketApi";
 import { EmptyState } from "@/shared/components/feedback/EmptyState";
 import { FeedbackMessage } from "@/shared/components/feedback/FeedbackMessage";
@@ -49,41 +56,38 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
   const canCloseDay = roles.some((role) => ["ADMIN_SYSTEM", "ADMIN_MARKET"].includes(role));
 
   const dailyClosingQuery = useQuery({
-    queryKey: ["daily-closing", effectiveMarketId, closingDate],
-    queryFn: () => getDailyClosing(Number(effectiveMarketId), closingDate),
+    queryKey: ["daily-closing-preview", effectiveMarketId, closingDate],
+    queryFn: () => previewDailyClosing(Number(effectiveMarketId), closingDate),
     enabled: mode === "daily" && effectiveMarketId.length > 0,
     retry: false,
   });
 
   const monthlyClosingQuery = useQuery({
-    queryKey: ["monthly-closing", effectiveMarketId, closingMonth],
-    queryFn: () => getMonthlyClosing(Number(effectiveMarketId), closingMonth),
+    queryKey: ["monthly-closing-preview", effectiveMarketId, closingMonth],
+    queryFn: () => previewMonthlyClosing(Number(effectiveMarketId), closingMonth),
     enabled: mode === "monthly" && effectiveMarketId.length > 0,
     retry: false,
   });
 
-  const dailyClosingNotFound = dailyClosingQuery.error instanceof ApiError && dailyClosingQuery.error.status === 404;
-  const monthlyClosingNotFound = monthlyClosingQuery.error instanceof ApiError && monthlyClosingQuery.error.status === 404;
-
   const closeDailyMutation = useMutation({
     mutationFn: () => closeDaily(Number(effectiveMarketId), closingDate),
     onSuccess: () => {
-      setFeedback({ kind: "success", message: "Cierre diario generado correctamente." });
+      setFeedback({ kind: "success", message: "Cierre diario guardado y actualizado correctamente." });
       void dailyClosingQuery.refetch();
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible generar el cierre diario.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible guardar el cierre diario.") });
     },
   });
 
   const closeMonthlyMutation = useMutation({
     mutationFn: () => closeMonthly(Number(effectiveMarketId), closingMonth),
     onSuccess: () => {
-      setFeedback({ kind: "success", message: "Cierre mensual generado correctamente." });
+      setFeedback({ kind: "success", message: "Cierre mensual guardado y actualizado correctamente." });
       void monthlyClosingQuery.refetch();
     },
     onError: (error) => {
-      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible generar el cierre mensual.") });
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No fue posible guardar el cierre mensual.") });
     },
   });
 
@@ -94,8 +98,8 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
     marketOptions.find((market) => String(market.id) === effectiveMarketId)?.name ?? user?.activeMarketName ?? "este Espacio";
   const confirmDescription =
     mode === "daily"
-      ? `Se generara el cierre diario de ${selectedMarketName} para la fecha ${closingDate}.`
-      : `Se generara el cierre mensual de ${selectedMarketName} para el periodo ${closingMonth}.`;
+      ? `Se guardara o actualizara el cierre diario de ${selectedMarketName} para la fecha ${closingDate}.`
+      : `Se guardara o actualizara el cierre mensual de ${selectedMarketName} para el periodo ${closingMonth}.`;
   const canTriggerClosing =
     effectiveMarketId.length > 0 &&
     !closeDailyMutation.isPending &&
@@ -232,7 +236,7 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
                       onClick={() => setConfirmOpen(true)}
                       className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
                     >
-                      {!canCloseDay ? "Solo lectura" : closeDailyMutation.isPending ? "Cerrando..." : "Generar cierre diario"}
+                      {!canCloseDay ? "Solo lectura" : closeDailyMutation.isPending ? "Guardando..." : "Guardar cierre diario"}
                     </button>
                     <button
                       type="button"
@@ -243,7 +247,7 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
                       }}
                       className="rounded-full border border-white/90 bg-white/75 px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-50"
                     >
-                      Consultar cierre
+                      Actualizar vista previa
                     </button>
                   </>
                 ) : (
@@ -254,7 +258,7 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
                       onClick={() => setConfirmOpen(true)}
                       className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(186,153,228,0.24)] disabled:opacity-50"
                     >
-                      {!canCloseDay ? "Solo lectura" : closeMonthlyMutation.isPending ? "Cerrando..." : "Generar cierre mensual"}
+                      {!canCloseDay ? "Solo lectura" : closeMonthlyMutation.isPending ? "Guardando..." : "Guardar cierre mensual"}
                     </button>
                     <button
                       type="button"
@@ -265,7 +269,7 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
                       }}
                       className="rounded-full border border-white/90 bg-white/75 px-4 py-3 text-sm font-semibold shadow-sm disabled:opacity-50"
                     >
-                      Consultar cierre
+                      Actualizar vista previa
                     </button>
                   </>
                 )}
@@ -327,13 +331,11 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
             <DailyClosingPanel
               query={dailyClosingQuery}
               closing={currentDailyClosing}
-              notFound={dailyClosingNotFound}
             />
           ) : (
             <MonthlyClosingPanel
               query={monthlyClosingQuery}
               closing={currentMonthlyClosing}
-              notFound={monthlyClosingNotFound}
             />
           )}
         </div>
@@ -401,7 +403,7 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
             <div className="rounded-[24px] border border-white/85 bg-white/70 p-4 shadow-sm">
               <p className="text-sm text-muted-foreground">Accion</p>
               <p className="mt-2 text-base font-semibold">
-                {mode === "daily" ? "Consolidar ventas del dia" : "Consolidar ventas del mes"}
+                {mode === "daily" ? "Guardar o actualizar ventas del dia" : "Guardar o actualizar ventas del mes"}
               </p>
             </div>
           </div>
@@ -410,7 +412,7 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
             message={
               mode === "daily"
                 ? "Al confirmar, el sistema persistira el resumen financiero diario y refrescara la vista automaticamente."
-                : "Al confirmar, el sistema persistira el cierre mensual y el detalle por Tienda para el periodo seleccionado."
+                : "Al confirmar, el sistema persistira o actualizara el cierre mensual y el detalle por Tienda para el periodo seleccionado."
             }
           />
         </div>
@@ -422,23 +424,12 @@ export function DailyClosingPage({ defaultMode = "daily" }: { defaultMode?: Clos
 function DailyClosingPanel({
   query,
   closing,
-  notFound,
 }: {
   query: ReturnType<typeof useQuery<DailyClosing>>;
   closing: DailyClosing | null;
-  notFound: boolean;
 }) {
   if (query.isLoading || query.isFetching) {
-    return <FeedbackMessage kind="info" message="Consultando cierre diario..." />;
-  }
-
-  if (query.isError && notFound && !closing) {
-    return (
-      <EmptyState
-        title="No existe cierre para esa fecha"
-        description="Todavia no hay cierre generado. Puedes crearlo ahora o consultar otra fecha."
-      />
-    );
+    return <FeedbackMessage kind="info" message="Calculando vista previa del cierre diario..." />;
   }
 
   if (query.isError && !closing) {
@@ -454,9 +445,10 @@ function DailyClosingPanel({
       <div className="soft-surface p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
+            <span className="soft-chip mb-2 inline-flex">{closing.closedAt ? "Cierre guardado" : "Informe preliminar"}</span>
             <h2 className="text-lg font-semibold">{closing.marketName}</h2>
             <p className="text-sm text-muted-foreground">
-              Fecha: {closing.closingDate} | Cerrado por: {closing.closedBy}
+              Fecha: {closing.closingDate} | {formatClosingStatus(closing.closedAt, closing.closedBy)}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -476,7 +468,7 @@ function DailyClosingPanel({
         <div className="mt-5 grid gap-3 text-sm md:grid-cols-3">
           <MetricCard label="Ventas" value={formatMoney(closing.totalSalesAmount)} />
           <MetricCard label="Comisiones" value={formatMoney(closing.totalCommissionAmount)} />
-          <MetricCard label="Neto" value={formatMoney(closing.totalNetAmount)} />
+          <MetricCard label="Total a recibir" value={formatMoney(closing.totalNetAmount)} />
         </div>
 
         <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
@@ -509,7 +501,9 @@ function DailyClosingPanel({
 
       <div className="soft-surface p-6">
         <h2 className="text-lg font-semibold">Desglose por Tienda</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Resumen persistido por Tienda dentro del cierre consultado.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Vista previa por Tienda. Al guardar, este mismo detalle queda registrado para el cierre.
+        </p>
 
         {closing.stores.length === 0 ? (
           <div className="mt-4">
@@ -527,7 +521,7 @@ function DailyClosingPanel({
                   <th>Ventas</th>
                   <th>Items</th>
                   <th>Comision</th>
-                  <th>Neto</th>
+                  <th>Total a recibir</th>
                 </tr>
               </thead>
               <tbody>
@@ -555,23 +549,12 @@ function DailyClosingPanel({
 function MonthlyClosingPanel({
   query,
   closing,
-  notFound,
 }: {
   query: ReturnType<typeof useQuery<MonthlyClosing>>;
   closing: MonthlyClosing | null;
-  notFound: boolean;
 }) {
   if (query.isLoading || query.isFetching) {
-    return <FeedbackMessage kind="info" message="Consultando cierre mensual..." />;
-  }
-
-  if (query.isError && notFound && !closing) {
-    return (
-      <EmptyState
-        title="No existe cierre mensual para ese periodo"
-        description="Todavia no hay cierre mensual generado. Puedes crearlo ahora o consultar otro mes."
-      />
-    );
+    return <FeedbackMessage kind="info" message="Calculando vista previa del cierre mensual..." />;
   }
 
   if (query.isError && !closing) {
@@ -587,9 +570,10 @@ function MonthlyClosingPanel({
       <div className="soft-surface p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
+            <span className="soft-chip mb-2 inline-flex">{closing.closedAt ? "Cierre guardado" : "Informe preliminar"}</span>
             <h2 className="text-lg font-semibold">{closing.marketName}</h2>
             <p className="text-sm text-muted-foreground">
-              Mes: {closing.closingMonth} | Cerrado por: {closing.closedBy}
+              Mes: {closing.closingMonth} | {formatClosingStatus(closing.closedAt, closing.closedBy)}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -609,7 +593,7 @@ function MonthlyClosingPanel({
         <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-5">
           <MetricCard label="Ventas" value={formatMoney(closing.totalSalesAmount)} />
           <MetricCard label="Comisiones" value={formatMoney(closing.totalCommissionAmount)} />
-          <MetricCard label="Neto" value={formatMoney(closing.totalNetAmount)} />
+          <MetricCard label="Total a recibir" value={formatMoney(closing.totalNetAmount)} />
           <MetricCard label="IVA total" value={formatMoney(closing.totalIvaAmount)} />
           <MetricCard label="IVA a pagar" value={formatMoney(closing.totalIvaToPayAmount)} />
         </div>
@@ -644,7 +628,9 @@ function MonthlyClosingPanel({
 
       <div className="soft-surface p-6">
         <h2 className="text-lg font-semibold">Resumen por Tienda</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Usa el cierre mensual persistido para revisar ventas, neto e IVA a pagar por Tienda.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Usa esta vista previa mensual para revisar ventas, total a recibir e IVA a pagar por Tienda antes de guardar.
+        </p>
 
         {closing.collaborators.length === 0 ? (
           <div className="mt-4">
@@ -663,7 +649,7 @@ function MonthlyClosingPanel({
                   <th>Ventas</th>
                   <th>Items</th>
                   <th>Comision</th>
-                  <th>Neto</th>
+                  <th>Total a recibir</th>
                   <th>IVA total</th>
                   <th>IVA a pagar</th>
                 </tr>
@@ -769,6 +755,14 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
+function formatClosingStatus(closedAt: string | null, closedBy: string | null) {
+  if (!closedAt) {
+    return "Vista previa sin guardar";
+  }
+
+  return `Guardado por: ${closedBy || "sistema"}`;
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof ApiError) {
     return error.message;
@@ -802,7 +796,7 @@ function buildDailyClosingRows(closing: DailyClosing) {
   return closing.stores.map((store) => ({
     espacio: closing.marketName,
     fecha_cierre: closing.closingDate,
-    cerrado_por: closing.closedBy,
+    cerrado_por: closing.closedBy || "Vista previa",
     tienda: store.storeName,
     ventas: store.saleCount,
     items: store.totalItems,
@@ -816,7 +810,7 @@ function buildMonthlyClosingRows(closing: MonthlyClosing) {
   return closing.collaborators.map((collaborator) => ({
     espacio: closing.marketName,
     mes_cierre: closing.closingMonth,
-    cerrado_por: closing.closedBy,
+    cerrado_por: closing.closedBy || "Vista previa",
     tienda: collaborator.collaboratorName,
     correo: collaborator.collaboratorEmail,
     factura: collaborator.factura ? "Si" : "No",

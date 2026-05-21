@@ -1,4 +1,4 @@
-import { apiFetch } from "@/shared/lib/api/client";
+import { apiFetch, apiFetchBlob } from "@/shared/lib/api/client";
 import type { PosSale } from "@/features/sales/api/posApi";
 
 export type PickupStatus = "PENDING" | "CHECKOUT_IN_PROGRESS" | "COLLECTED" | "CANCELLED";
@@ -9,6 +9,7 @@ export type Pickup = {
   marketName: string;
   storeId: number;
   storeName: string;
+  pickupBarcode: string;
   pickupNumber: string;
   customerName: string;
   description: string;
@@ -70,5 +71,18 @@ export function cancelPickup(pickupId: number) {
 export function checkoutPickup(pickupId: number) {
   return apiFetch<PreparePickupCheckoutResponse>(`/api/pickups/${pickupId}/checkout`, {
     method: "POST",
+  });
+}
+
+export function checkoutPickupByCode(code: string) {
+  return apiFetch<PreparePickupCheckoutResponse>("/api/pickups/checkout/resolve", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+export async function downloadPickupLabel(pickupId: number) {
+  return apiFetchBlob(`/api/pickups/${pickupId}/label`, {
+    method: "GET",
   });
 }

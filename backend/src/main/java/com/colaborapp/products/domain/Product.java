@@ -66,7 +66,10 @@ public class Product extends BaseEntity {
     @Column(nullable = false, length = 30)
     private ProductStatus status;
 
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(nullable = false, unique = true, length = 7)
+    private String shortBarcode;
+
+    @Column(unique = true, length = 64)
     private String barcode;
 
     @Version

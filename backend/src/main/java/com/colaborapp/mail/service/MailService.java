@@ -82,7 +82,7 @@ public class MailService {
 
         try {
             MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             if (!mailFrom.isBlank()) {
                 helper.setFrom(mailFrom);
             }

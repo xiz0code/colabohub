@@ -142,6 +142,43 @@ public class PosSaleService {
     }
 
     @Transactional
+    public PosSaleResponse editSale(Long saleId) {
+        requirePosWriteAccess();
+        Sale sale = getSaleEntity(saleId);
+        if (sale.getStatus() == SaleStatus.CANCELLED) {
+            throw new BusinessException("Cancelled sales cannot be edited.");
+        }
+
+        if (sale.getStatus() == SaleStatus.OPEN) {
+            return buildResponse(
+                    sale,
+                    saleItemRepository.findAllBySaleIdWithDetails(sale.getId()),
+                    saleStoreSummaryRepository.findAllBySaleIdWithStore(sale.getId()));
+        }
+
+        Optional<Sale> otherOpenSale = resolveExistingOpenSale(sale.getTenant().getId(), sale.getMarket() != null ? sale.getMarket().getId() : null)
+                .filter(existing -> !existing.getId().equals(sale.getId()));
+        if (otherOpenSale.isPresent()) {
+            throw new BusinessException("Ya existe otra venta abierta en este Espacio. Cierrala o anulala antes de editar una venta confirmada.");
+        }
+
+        List<SaleItem> items = saleItemRepository.findAllBySaleIdWithDetails(saleId);
+        restoreSaleStock(sale, items, "SALE_EDIT_REOPEN");
+
+        sale.setStatus(SaleStatus.OPEN);
+        sale.setConfirmedAt(null);
+        sale.setCancelledAt(null);
+        sale.setCancelledBy(null);
+        sale.setCancellationReason(null);
+        saleRepository.save(sale);
+
+        return buildResponse(
+                sale,
+                items,
+                saleStoreSummaryRepository.findAllBySaleIdWithStore(saleId));
+    }
+
+    @Transactional
     public PosSaleResponse addItem(Long saleId, PosSaleItemRequest request) {
         requirePosWriteAccess();
         Sale sale = getOpenSale(saleId);
@@ -260,39 +297,8 @@ public class PosSaleService {
         }
 
         List<SaleItem> items = saleItemRepository.findAllBySaleIdWithDetails(saleId);
-        Map<Long, Product> lockedProducts = new HashMap<>();
-        for (Product product : productRepository.findAllByTenantIdAndIdInForUpdate(
-                sale.getTenant().getId(),
-                items.stream().map(SaleItem::getProduct).filter(java.util.Objects::nonNull).map(Product::getId).distinct().toList())) {
-            lockedProducts.put(product.getId(), product);
-        }
-
         if (sale.getStatus() == SaleStatus.CONFIRMED) {
-            for (SaleItem item : items) {
-                if (item.isManualEntry() || item.getProduct() == null) {
-                    continue;
-                }
-                Product product = lockedProducts.get(item.getProduct().getId());
-                if (product == null) {
-                    throw new ResourceNotFoundException("Product not found for sale item: " + item.getProduct().getId());
-                }
-
-                int previousStock = product.getStock();
-                int newStock = previousStock + item.getQuantity();
-                product.setStock(newStock);
-
-                StockMovement movement = new StockMovement();
-                movement.setTenant(product.getTenant());
-                movement.setProduct(product);
-                movement.setStore(product.getStore());
-                movement.setType(StockMovementType.ADJUSTMENT);
-                movement.setQuantity(item.getQuantity());
-                movement.setPreviousStock(previousStock);
-                movement.setNewStock(newStock);
-                movement.setReferenceType("SALE_CANCEL");
-                movement.setReferenceId(sale.getId());
-                stockMovementRepository.save(movement);
-            }
+            restoreSaleStock(sale, items, "SALE_CANCEL");
         }
 
         sale.setStatus(SaleStatus.CANCELLED);
@@ -395,9 +401,16 @@ public class PosSaleService {
         persistRecalculation(sale, snapshot);
         saleRepository.save(sale);
         pickupRepository.findAllByLinkedSaleId(saleId).forEach(pickup -> {
-            pickup.setStatus(PickupStatus.COLLECTED);
-            pickup.setCollectedAt(sale.getConfirmedAt());
-            pickup.setCollectedBy(authenticatedUserService.getCurrentUserSnapshot().user().getEmail());
+            if (saleItemRepository.findBySaleIdAndManualReference(saleId, "pickup:" + pickup.getId()).isPresent()) {
+                pickup.setStatus(PickupStatus.COLLECTED);
+                pickup.setCollectedAt(sale.getConfirmedAt());
+                pickup.setCollectedBy(authenticatedUserService.getCurrentUserSnapshot().user().getEmail());
+            } else {
+                pickup.setLinkedSale(null);
+                pickup.setStatus(PickupStatus.PENDING);
+                pickup.setCollectedAt(null);
+                pickup.setCollectedBy(null);
+            }
         });
 
         return buildResponse(
@@ -480,6 +493,41 @@ public class PosSaleService {
         return saleRepository.findFirstByTenantIdAndStatusOrderByOpenedAtDesc(tenantId, SaleStatus.OPEN);
     }
 
+    private void restoreSaleStock(Sale sale, List<SaleItem> items, String referenceType) {
+        Map<Long, Product> lockedProducts = new HashMap<>();
+        for (Product product : productRepository.findAllByTenantIdAndIdInForUpdate(
+                sale.getTenant().getId(),
+                items.stream().map(SaleItem::getProduct).filter(java.util.Objects::nonNull).map(Product::getId).distinct().toList())) {
+            lockedProducts.put(product.getId(), product);
+        }
+
+        for (SaleItem item : items) {
+            if (item.isManualEntry() || item.getProduct() == null) {
+                continue;
+            }
+            Product product = lockedProducts.get(item.getProduct().getId());
+            if (product == null) {
+                throw new ResourceNotFoundException("Product not found for sale item: " + item.getProduct().getId());
+            }
+
+            int previousStock = product.getStock();
+            int newStock = previousStock + item.getQuantity();
+            product.setStock(newStock);
+
+            StockMovement movement = new StockMovement();
+            movement.setTenant(product.getTenant());
+            movement.setProduct(product);
+            movement.setStore(product.getStore());
+            movement.setType(StockMovementType.ADJUSTMENT);
+            movement.setQuantity(item.getQuantity());
+            movement.setPreviousStock(previousStock);
+            movement.setNewStock(newStock);
+            movement.setReferenceType(referenceType);
+            movement.setReferenceId(sale.getId());
+            stockMovementRepository.save(movement);
+        }
+    }
+
     private Market resolveMarket(Long tenantId, Long marketId) {
         if (marketId == null) {
             return null;
@@ -518,7 +566,7 @@ public class PosSaleService {
         item.setCollaboratorUserId(product.getOwnerUser() != null ? product.getOwnerUser().getId() : null);
         item.setCollaboratorNameSnapshot(product.getOwnerUser() != null ? product.getOwnerUser().getFullName() : null);
         item.setProductSkuSnapshot(product.getSku());
-        item.setProductBarcodeSnapshot(product.getBarcode());
+        item.setProductBarcodeSnapshot(product.getShortBarcode() != null ? product.getShortBarcode() : product.getBarcode());
         item.setQuantity(0);
         item.setBaseUnitPrice(ZERO);
         item.setLineBaseSubtotal(ZERO);
@@ -542,8 +590,11 @@ public class PosSaleService {
         item.setProduct(null);
         item.setStore(store);
         item.setProductNameSnapshot(request.itemName().trim());
-        item.setCollaboratorUserId(null);
-        item.setCollaboratorNameSnapshot(store.getName());
+        item.setCollaboratorUserId(request.collaboratorUserId());
+        item.setCollaboratorNameSnapshot(
+                request.collaboratorName() != null && !request.collaboratorName().isBlank()
+                        ? request.collaboratorName().trim()
+                        : store.getName());
         item.setProductSkuSnapshot("RETIRO");
         item.setProductBarcodeSnapshot("");
         item.setManualEntry(true);

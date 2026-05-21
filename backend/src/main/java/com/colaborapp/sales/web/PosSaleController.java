@@ -58,6 +58,11 @@ public class PosSaleController {
         return posSaleService.getSale(saleId);
     }
 
+    @PostMapping("/{saleId}/edit")
+    public PosSaleResponse editSale(@PathVariable Long saleId) {
+        return posSaleService.editSale(saleId);
+    }
+
     @PostMapping("/{saleId}/items")
     public PosSaleResponse addItem(@PathVariable Long saleId, @Valid @RequestBody PosSaleItemRequest request) {
         return posSaleService.addItem(saleId, request);

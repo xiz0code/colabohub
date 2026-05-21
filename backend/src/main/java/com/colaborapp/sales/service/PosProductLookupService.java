@@ -39,7 +39,7 @@ public class PosProductLookupService {
     }
 
     @Transactional(readOnly = true)
-    public List<PosProductResponse> search(String query) {
+    public List<PosProductResponse> search(String query, Long ownerUserId, int size) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         List<Long> marketIds = accessControlService.currentMarketIds();
         if (marketIds.isEmpty()) {
@@ -47,7 +47,7 @@ public class PosProductLookupService {
         }
         String normalizedQuery = normalizeSearchPattern(query);
         log.info("POS search param type: {}", normalizedQuery.getClass().getName());
-        return productRepository.searchByMarketIds(tenantId, marketIds, null, null, ProductStatus.ACTIVE, normalizedQuery, PageRequest.of(0, 10))
+        return productRepository.searchByMarketIds(tenantId, marketIds, null, ownerUserId, ProductStatus.ACTIVE, normalizedQuery, PageRequest.of(0, normalizeSize(size)))
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -81,6 +81,7 @@ public class PosProductLookupService {
         String collaboratorName = product.getOwnerUser() != null && product.getOwnerUser().getFullName() != null && !product.getOwnerUser().getFullName().isBlank()
                 ? product.getOwnerUser().getFullName()
                 : "Sin colaborador";
+        String displayBarcode = product.getShortBarcode() != null ? product.getShortBarcode() : product.getBarcode();
         return new PosProductResponse(
                 product.getId(),
                 product.getStore().getId(),
@@ -88,12 +89,19 @@ public class PosProductLookupService {
                 collaboratorName,
                 product.getName(),
                 product.getSku(),
-                product.getBarcode(),
+                displayBarcode,
                 product.getStock(),
                 product.getSalePrice());
     }
 
     private String normalizeSearchPattern(String query) {
         return "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
+    }
+
+    private int normalizeSize(int size) {
+        if (size <= 0) {
+            return 30;
+        }
+        return Math.min(size, 60);
     }
 }

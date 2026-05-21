@@ -43,6 +43,10 @@ public class AccessControlService {
         return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR);
     }
 
+    public boolean canAdjustCatalogStock() {
+        return hasRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.COLLABORATOR, RoleCode.STORE_USER);
+    }
+
     public boolean canOperatePos() {
         return hasRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
     }

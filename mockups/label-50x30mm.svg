@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="700" viewBox="0 0 1100 700">
+  <rect width="1100" height="700" fill="#f7f4fb"/>
+  <text x="60" y="70" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#2c2238">
+    Mockup etiqueta térmica 50 x 30 mm
+  </text>
+  <text x="60" y="112" font-family="Arial, sans-serif" font-size="18" fill="#6a5d7c">
+    Propuesta cómoda: nombre corto + precio + Code128 + número legible
+  </text>
+
+  <g transform="translate(120 170)">
+    <rect x="0" y="0" width="620" height="372" rx="24" fill="#ffffff" stroke="#d8cde7" stroke-width="4"/>
+    <text x="34" y="54" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#332643">
+      Photocard BTS
+    </text>
+    <text x="34" y="104" font-family="Arial, sans-serif" font-size="54" font-weight="700" fill="#1f1728">
+      $1.000
+    </text>
+
+    <g transform="translate(34 138)">
+      <rect x="0" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="10" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="18" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="30" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="38" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="50" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="64" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="72" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="84" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="92" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="106" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="118" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="128" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="144" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="156" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="164" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="178" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="186" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="198" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="212" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="220" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="234" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="246" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="256" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="272" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="282" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="294" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="306" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="316" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="332" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="344" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="354" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="368" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="378" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="394" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="406" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="416" y="0" width="7" height="138" fill="#24182f"/>
+      <rect x="430" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="442" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="452" y="0" width="9" height="138" fill="#24182f"/>
+      <rect x="468" y="0" width="5" height="138" fill="#24182f"/>
+      <rect x="480" y="0" width="2" height="138" fill="#24182f"/>
+      <rect x="490" y="0" width="7" height="138" fill="#24182f"/>
+    </g>
+
+    <text x="34" y="332" font-family="Arial, sans-serif" font-size="28" letter-spacing="1.4" fill="#433453">
+      7502434257164
+    </text>
+  </g>
+
+  <g transform="translate(790 200)">
+    <text x="0" y="0" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#2c2238">
+      Qué permite este tamaño
+    </text>
+    <text x="0" y="42" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Nombre corto del producto
+    </text>
+    <text x="0" y="76" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Precio más grande
+    </text>
+    <text x="0" y="110" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Código más respirado
+    </text>
+    <text x="0" y="144" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      • Número legible debajo
+    </text>
+    <text x="0" y="198" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#2c2238">
+      Mi recomendación
+    </text>
+    <text x="0" y="240" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      Este formato es mucho más seguro
+    </text>
+    <text x="0" y="274" font-family="Arial, sans-serif" font-size="18" fill="#5c4f6f">
+      para lectura con pistola y uso diario.
+    </text>
+  </g>
+</svg>

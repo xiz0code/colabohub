@@ -35,6 +35,7 @@ import { downloadCsv } from "@/shared/lib/files/downloadCsv";
 describe("SalesTodayPage", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   beforeEach(() => {
@@ -190,8 +191,88 @@ describe("SalesTodayPage", () => {
       expect(screen.getByRole("heading", { name: "Camila" })).toBeInTheDocument();
     });
     expect(screen.getAllByText("Sticker BTS").length).toBeGreaterThan(0);
-    expect(screen.getByText("Total del periodo")).toBeInTheDocument();
-    expect(screen.getByText("Comision fija")).toBeInTheDocument();
+    expect(screen.getAllByText("Total a recibir").length).toBeGreaterThan(0);
+    expect(screen.getByText("Comisión fija")).toBeInTheDocument();
+  });
+
+  it("hides inactive tiendas from the report selector", async () => {
+    mockUseSession.mockReturnValue({
+      primaryRole: "ADMIN_SYSTEM",
+      user: {
+        id: 1,
+        fullName: "Admin",
+      },
+    });
+    vi.mocked(getSalesTodayDetails).mockResolvedValue({
+      businessDate: "2026-03-15",
+      totalSales: 0,
+      totalAmount: 0,
+      totalCommission: 0,
+      totalNet: 0,
+      salesCount: 0,
+      stores: [],
+      sales: [],
+    });
+    vi.mocked(listUsers).mockResolvedValue([
+      {
+        id: 8,
+        email: "camila@example.com",
+        fullName: "Camila",
+        phone: null,
+        contactName: null,
+        description: null,
+        monthlyRent: null,
+        startDate: null,
+        standNumber: null,
+        factura: false,
+        roles: ["STORE_USER"],
+        marketIds: [1],
+        storeIds: [1],
+        active: true,
+        createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-01T00:00:00Z",
+      },
+      {
+        id: 9,
+        email: "inactiva@example.com",
+        fullName: "Tienda Inactiva",
+        phone: null,
+        contactName: null,
+        description: null,
+        monthlyRent: null,
+        startDate: null,
+        standNumber: null,
+        factura: false,
+        roles: ["STORE_USER"],
+        marketIds: [1],
+        storeIds: [2],
+        active: false,
+        createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-01T00:00:00Z",
+      },
+    ]);
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/reports/collaborators"]}>
+        <QueryClientProvider client={queryClient}>
+          <SalesTodayPage defaultTab="collaborators" />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    const collaboratorSelect = await screen.findByLabelText("Tienda");
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Camila" })).toBeInTheDocument();
+    });
+    expect(collaboratorSelect).not.toHaveTextContent("Tienda Inactiva");
   });
 
   it("downloads the collaborator report as csv", async () => {
@@ -294,5 +375,71 @@ describe("SalesTodayPage", () => {
         }),
       ]),
     );
+  });
+
+  it("usa la fecha local para el rango inicial de Mis ventas", async () => {
+    const RealDate = Date;
+    class MockDate extends RealDate {
+      constructor(...args: any[]) {
+        if (args.length === 0) {
+          super("2026-05-05T23:30:00-04:00");
+          return;
+        }
+        super(...(args as [any]));
+      }
+
+      static now() {
+        return new RealDate("2026-05-05T23:30:00-04:00").getTime();
+      }
+    }
+
+    vi.stubGlobal("Date", MockDate as unknown as DateConstructor);
+
+    vi.mocked(getSalesTodayDetails).mockResolvedValue({
+      businessDate: "2026-05-05",
+      totalSales: 0,
+      totalAmount: 0,
+      totalCommission: 0,
+      totalNet: 0,
+      salesCount: 0,
+      stores: [],
+      sales: [],
+    });
+    vi.mocked(listUsers).mockResolvedValue([]);
+    vi.mocked(getCollaboratorSalesReport).mockResolvedValue({
+      collaboratorUserId: 7,
+      collaboratorName: "PKMSTORE",
+      dateFrom: "2026-05-01",
+      dateTo: "2026-05-05",
+      totalAmount: 0,
+      totalCommissionAmount: 0,
+      totalNetAmount: 0,
+      totalIvaAmount: 0,
+      entries: [],
+    });
+
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <SalesTodayPage />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Detalle mensual de ventas")).toBeInTheDocument();
+    });
+
+    const dateInputs = screen.getAllByDisplayValue("2026-05-05");
+    expect(dateInputs.length).toBeGreaterThan(0);
   });
 });

@@ -7,6 +7,7 @@ import {
   createProduct,
   deletePromotionGroup,
   getProductAudit,
+  increaseProductStock,
   importProductsCsv,
   importStockReductionsCsv,
   listPromotionGroups,
@@ -45,7 +46,8 @@ type ProductFormState = {
 };
 
 type BarcodeModalState = {
-  items: Array<{ productId: number; productName: string; quantity: string }>;
+  format: "A4" | "LETTER" | "LABEL_30X20";
+  items: Array<{ productId: number; productName: string; quantity: string; stockQuantity: number }>;
 };
 
 type ImportModalState = {
@@ -56,6 +58,11 @@ type ImportModalState = {
 type StockReductionModalState = {
   file: File | null;
   result: ProductImportResult | null;
+};
+
+type StockIncreaseModalState = {
+  product: Product;
+  quantity: string;
 };
 
 const EMPTY_FORM: ProductFormState = {
@@ -74,6 +81,9 @@ const EMPTY_FORM: ProductFormState = {
   promotionEndsAt: "",
 };
 
+const PRODUCTS_PAGE_SIZE = 100;
+const MAX_LABELS_PER_BARCODE_FILE = 240;
+
 export function ProductsPage() {
   const queryClient = useQueryClient();
   const { user, primaryRole } = useSession();
@@ -87,12 +97,18 @@ export function ProductsPage() {
   const canCreateProducts = !isSeller;
   const canEditProducts = primaryRole === "ADMIN_SYSTEM" || primaryRole === "ADMIN_MARKET";
   const canDeleteProducts = primaryRole === "ADMIN_SYSTEM" || primaryRole === "ADMIN_MARKET";
+  const canIncreaseStock =
+    primaryRole === "ADMIN_SYSTEM" ||
+    primaryRole === "ADMIN_MARKET" ||
+    primaryRole === "COLLABORATOR" ||
+    isStoreUser;
   const canPrintBarcodes = !isSeller;
   const canViewHistory = !isSeller;
   const [stockViewFilter, setStockViewFilter] = useState<"ALL" | "LOW_STOCK" | "WITH_PROMOTION" | "NO_PROMOTION">("ALL");
   const [lowStockThreshold, setLowStockThreshold] = useState("2");
   const [search, setSearch] = useState("");
   const [selectedOwnerId, setSelectedOwnerId] = useState("");
+  const [productsPage, setProductsPage] = useState(0);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
@@ -104,6 +120,21 @@ export function ProductsPage() {
   const [barcodeModal, setBarcodeModal] = useState<BarcodeModalState | null>(null);
   const [importModal, setImportModal] = useState<ImportModalState | null>(null);
   const [stockReductionModal, setStockReductionModal] = useState<StockReductionModalState | null>(null);
+  const [stockIncreaseModal, setStockIncreaseModal] = useState<StockIncreaseModalState | null>(null);
+  const [lowStockExpanded, setLowStockExpanded] = useState(false);
+  const totalBarcodeLabels = useMemo(
+    () =>
+      (barcodeModal?.items ?? []).reduce((sum, item) => {
+        const quantity = Number(item.quantity);
+        return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
+      }, 0),
+    [barcodeModal],
+  );
+  const barcodeHeavyDownload = totalBarcodeLabels >= 500;
+  const estimatedBarcodeFiles = useMemo(
+    () => Math.max(1, Math.ceil(totalBarcodeLabels / MAX_LABELS_PER_BARCODE_FILE)),
+    [totalBarcodeLabels],
+  );
 
   const marketSettingsQuery = useQuery({
     queryKey: ["settings", "market", activeMarketId],
@@ -112,10 +143,11 @@ export function ProductsPage() {
   });
 
   const productsQuery = useQuery({
-    queryKey: ["products", "catalog", search, selectedOwnerId],
+    queryKey: ["products", "catalog", search, selectedOwnerId, productsPage],
     queryFn: () =>
       listProducts({
-        size: 500,
+        page: productsPage,
+        size: PRODUCTS_PAGE_SIZE,
         ownerUserId: selectedOwnerId ? Number(selectedOwnerId) : undefined,
         query: search || undefined,
         status: "ACTIVE",
@@ -176,6 +208,19 @@ export function ProductsPage() {
     }
     setLowStockThreshold(String(marketSettingsQuery.data.lowStockAlertThreshold ?? 2));
   }, [marketSettingsQuery.data]);
+
+  useEffect(() => {
+    setProductsPage(0);
+  }, [search, selectedOwnerId, stockViewFilter]);
+
+  useEffect(() => {
+    if (!productsQuery.data) {
+      return;
+    }
+    if (productsQuery.data.totalPages > 0 && productsPage >= productsQuery.data.totalPages) {
+      setProductsPage(productsQuery.data.totalPages - 1);
+    }
+  }, [productsPage, productsQuery.data]);
   const filteredProducts = useMemo(
     () => {
       const ownerFiltered = productsQuery.data?.content ?? [];
@@ -284,6 +329,22 @@ export function ProductsPage() {
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos eliminar el producto.") }),
   });
 
+  const stockIncreaseMutation = useMutation({
+    mutationFn: ({ productId, quantity }: { productId: number; quantity: number }) =>
+      increaseProductStock(productId, quantity),
+    onSuccess: async (_, variables) => {
+      const productName = stockIncreaseModal?.product.name ?? "El producto";
+      setFeedback({
+        kind: "success",
+        message: `${productName} aumento su stock en ${variables.quantity} unidad(es).`,
+      });
+      setStockIncreaseModal(null);
+      await queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+    onError: (error) =>
+      setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos aumentar el stock del producto.") }),
+  });
+
   const deletePromotionGroupMutation = useMutation({
     mutationFn: (group: ProductPromotionGroup) => deletePromotionGroup(group.id),
     onSuccess: async (_, group) => {
@@ -298,23 +359,44 @@ export function ProductsPage() {
   });
 
   const barcodeMutation = useMutation({
-    mutationFn: () =>
-      printBarcodeLabels({
-        items: (barcodeModal?.items ?? []).map((item) => ({
+    mutationFn: async () => {
+      const batches = splitBarcodeItemsIntoBatches(
+        (barcodeModal?.items ?? []).map((item) => ({
           productId: item.productId,
           quantity: Number(item.quantity),
         })),
-        includeCollaboratorName: true,
-      }),
-    onSuccess: async (blob) => {
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "codigos-colabohub.pdf";
-      anchor.click();
-      window.URL.revokeObjectURL(url);
+        MAX_LABELS_PER_BARCODE_FILE,
+      );
+      const format = barcodeModal?.format ?? "A4";
+
+      for (const [index, batch] of batches.entries()) {
+        const blob = await printBarcodeLabels({
+          items: batch,
+          includeCollaboratorName: true,
+          format,
+        });
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download =
+          batches.length === 1
+            ? "codigos-colabohub.pdf"
+            : `codigos-colabohub-parte-${index + 1}.pdf`;
+        anchor.click();
+        window.URL.revokeObjectURL(url);
+      }
+
+      return batches.length;
+    },
+    onSuccess: async (filesGenerated) => {
       setBarcodeModal(null);
-      setFeedback({ kind: "success", message: "PDF de codigos generado correctamente." });
+      setFeedback({
+        kind: "success",
+        message:
+          filesGenerated > 1
+            ? `Se generaron ${filesGenerated} archivos PDF para que la descarga sea mas liviana.`
+            : "PDF de codigos generado correctamente.",
+      });
       await Promise.resolve();
     },
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos generar el PDF.") }),
@@ -328,8 +410,8 @@ export function ProductsPage() {
         kind: result.errorCount > 0 ? "info" : "success",
         message:
           result.errorCount > 0
-            ? `La carga masiva termino con ${result.successCount} productos creados y ${result.errorCount} filas con observaciones.`
-            : `Se importaron ${result.successCount} productos correctamente.`,
+            ? `La carga masiva termino con ${result.successCount} productos procesados y ${result.errorCount} filas con observaciones.`
+            : `Se procesaron ${result.successCount} productos correctamente.`,
       });
       await queryClient.invalidateQueries({ queryKey: ["products"] });
     },
@@ -358,6 +440,24 @@ export function ProductsPage() {
     filteredProducts.length > 0 &&
     filteredProducts.every((product) => selectedProductIds.includes(product.id));
 
+  const handleIncreaseStockSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!stockIncreaseModal) {
+      return;
+    }
+
+    const quantity = Number(stockIncreaseModal.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setFeedback({ kind: "error", message: "Ingresa una cantidad valida para aumentar el stock." });
+      return;
+    }
+
+    stockIncreaseMutation.mutate({
+      productId: stockIncreaseModal.product.id,
+      quantity: Math.floor(quantity),
+    });
+  };
+
   return (
     <section className="space-y-6">
       <PageHeader
@@ -381,8 +481,8 @@ export function ProductsPage() {
             <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-900">{isStoreUser ? user?.fullName ?? "Tu Tienda" : activeMarketName}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {isStoreUser
-                ? "Administra tus productos, busca por nombre, SKU o codigo de barras y prepara etiquetas para operar con rapidez."
-              : "Cada producto se vincula a una Tienda y puede encontrarse por nombre, SKU o codigo de barras."}
+                ? "Administra tus productos, busca por nombre, SKU o codigo del producto y prepara etiquetas para operar con rapidez."
+              : "Cada producto se vincula a una Tienda y puede encontrarse por nombre, SKU o codigo del producto."}
             </p>
           </div>
 
@@ -404,8 +504,8 @@ export function ProductsPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nombre, SKU o codigo de barras"
-              aria-label="Buscar por nombre, SKU o codigo de barras"
+              placeholder="Buscar por nombre, SKU o codigo del producto"
+              aria-label="Buscar por nombre, SKU o codigo del producto"
               className="min-h-12 rounded-[20px] border border-white/85 bg-white/80 px-5 py-3 text-sm shadow-sm outline-none transition focus:border-violet-200 focus:bg-white"
             />
             {canImport ? (
@@ -484,10 +584,25 @@ export function ProductsPage() {
                   Alerta visual de productos que estan en {resolvedLowStockThreshold} unidades o menos para que puedas reponer a tiempo.
                 </p>
               </div>
-              <span className="soft-chip">{lowStockProducts.length} producto(s) en alerta</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="soft-chip">{lowStockProducts.length} producto(s) en alerta</span>
+                <button
+                  type="button"
+                  onClick={() => setLowStockExpanded((current) => !current)}
+                  className="rounded-full border border-white/90 bg-white/80 px-4 py-2 text-xs font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5"
+                >
+                  {lowStockExpanded ? "Ocultar alertas" : "Ver alertas"}
+                </button>
+              </div>
             </div>
 
-            {lowStockProducts.length === 0 ? (
+            {!lowStockExpanded ? (
+              <div className="mt-4 rounded-[22px] border border-white/80 bg-white/75 px-4 py-3 text-sm text-muted-foreground">
+                {lowStockProducts.length === 0
+                  ? `Sin alertas por ahora. Cuando un producto llegue a ${resolvedLowStockThreshold} unidades o menos, aparecera aqui.`
+                  : `Hay ${lowStockProducts.length} alerta(s) activas. Abre el acordeon para revisar el detalle sin quitarle protagonismo a tu catalogo.`}
+              </div>
+            ) : lowStockProducts.length === 0 ? (
               <div className="mt-4">
                 <EmptyState
                   title="No tienes productos con stock bajo"
@@ -551,10 +666,12 @@ export function ProductsPage() {
               type="button"
               onClick={() =>
                 setBarcodeModal({
+                  format: "A4",
                   items: selectedProducts.map((product) => ({
                     productId: product.id,
                     productName: product.name,
-                    quantity: "1",
+                    quantity: String(product.stock),
+                    stockQuantity: product.stock,
                   })),
                 })
               }
@@ -614,7 +731,7 @@ export function ProductsPage() {
                   <th>Stock</th>
                   <th>Descripcion corta</th>
                   <th>Promocion</th>
-          {(canEditProducts || canDeleteProducts || canViewHistory || canPrintBarcodes) ? <th>Acciones</th> : null}
+          {(canEditProducts || canDeleteProducts || canViewHistory || canPrintBarcodes || canIncreaseStock) ? <th>Acciones</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -656,7 +773,7 @@ export function ProductsPage() {
                         {product.hasPromotion ? "SI" : "NO"}
                       </span>
                     </td>
-                    {(canEditProducts || canDeleteProducts || canViewHistory || canPrintBarcodes) ? (
+                    {(canEditProducts || canDeleteProducts || canViewHistory || canPrintBarcodes || canIncreaseStock) ? (
                       <td>
                         <div className="flex flex-wrap gap-2">
                           {canEditProducts ? (
@@ -677,6 +794,15 @@ export function ProductsPage() {
                               Historial
                             </button>
                           ) : null}
+                          {canIncreaseStock ? (
+                            <button
+                              type="button"
+                              onClick={() => setStockIncreaseModal({ product, quantity: "1" })}
+                              className="rounded-full border border-emerald-100 bg-emerald-50/90 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:-translate-y-0.5"
+                            >
+                              Aumentar stock
+                            </button>
+                          ) : null}
                           {canDeleteProducts ? (
                             <button
                               type="button"
@@ -692,7 +818,13 @@ export function ProductsPage() {
                               type="button"
                               onClick={() =>
                                 setBarcodeModal({
-                                  items: [{ productId: product.id, productName: product.name, quantity: "1" }],
+                                  format: "A4",
+                                  items: [{
+                                    productId: product.id,
+                                    productName: product.name,
+                                    quantity: String(product.stock),
+                                    stockQuantity: product.stock,
+                                  }],
                                 })
                               }
                               className="rounded-full border border-white/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5"
@@ -709,6 +841,50 @@ export function ProductsPage() {
             </table>
           </div>
         )}
+
+        {productsQuery.data && productsQuery.data.totalPages > 1 ? (
+          <div className="mt-5 flex flex-col gap-3 rounded-[24px] border border-white/80 bg-white/75 p-4 shadow-[0_14px_32px_rgba(186,170,211,0.08)] sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              Mostrando página <span className="font-semibold text-foreground">{productsQuery.data.page + 1}</span> de{" "}
+              <span className="font-semibold text-foreground">{productsQuery.data.totalPages}</span> ·{" "}
+              <span className="font-semibold text-foreground">{productsQuery.data.totalElements}</span> productos en total
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setProductsPage(0)}
+                disabled={productsQuery.data.first || productsQuery.isFetching}
+                className="rounded-full border border-white/90 bg-white/85 px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Primera
+              </button>
+              <button
+                type="button"
+                onClick={() => setProductsPage((current) => Math.max(current - 1, 0))}
+                disabled={productsQuery.data.first || productsQuery.isFetching}
+                className="rounded-full border border-white/90 bg-white/85 px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => setProductsPage((current) => Math.min(current + 1, productsQuery.data.totalPages - 1))}
+                disabled={productsQuery.data.last || productsQuery.isFetching}
+                className="rounded-full border border-white/90 bg-white/85 px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Siguiente
+              </button>
+              <button
+                type="button"
+                onClick={() => setProductsPage(productsQuery.data.totalPages - 1)}
+                disabled={productsQuery.data.last || productsQuery.isFetching}
+                className="rounded-full border border-white/90 bg-white/85 px-4 py-2 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Última
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <Modal
@@ -769,6 +945,69 @@ export function ProductsPage() {
               message="No se borra el registro historico: solo se desactiva para mantener trazabilidad de ventas y cierres."
             />
           </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={canIncreaseStock && stockIncreaseModal !== null}
+        onClose={() => {
+          if (!stockIncreaseMutation.isPending) {
+            setStockIncreaseModal(null);
+          }
+        }}
+        title={stockIncreaseModal ? `Aumentar stock de ${stockIncreaseModal.product.name}` : "Aumentar stock"}
+        description="Agrega unidades rapidamente sin editar todo el producto. El movimiento quedara registrado en el historial."
+        maxWidthClassName="max-w-lg"
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setStockIncreaseModal(null)}
+              disabled={stockIncreaseMutation.isPending}
+              className="rounded-full border border-white/90 bg-white/80 px-4 py-2.5 text-sm font-semibold text-muted-foreground disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              form="increase-stock-form"
+              disabled={stockIncreaseMutation.isPending || stockIncreaseModal === null}
+              className="rounded-full bg-[linear-gradient(135deg,rgba(76,210,153,0.96),rgba(104,222,173,0.92))] px-4 py-2.5 text-sm font-semibold text-slate-900 disabled:opacity-50"
+            >
+              {stockIncreaseMutation.isPending ? "Aumentando..." : "Agregar unidades"}
+            </button>
+          </div>
+        }
+      >
+        {stockIncreaseModal ? (
+          <form id="increase-stock-form" className="space-y-5" onSubmit={handleIncreaseStockSubmit}>
+            <div className="grid gap-3 md:grid-cols-3">
+              <InfoCard label="Tienda" value={stockIncreaseModal.product.ownerFullName ?? "Sin Tienda"} />
+              <InfoCard label="Stock actual" value={`${stockIncreaseModal.product.stock} unidad(es)`} />
+              <InfoCard label="Codigo" value={stockIncreaseModal.product.barcode ?? "Sin codigo"} />
+            </div>
+
+            <label className="grid gap-2 text-sm">
+              <span>Cuantas unidades quieres agregar</span>
+              <input
+                min="1"
+                step="1"
+                type="number"
+                value={stockIncreaseModal.quantity}
+                onChange={(event) =>
+                  setStockIncreaseModal((current) =>
+                    current
+                      ? {
+                          ...current,
+                          quantity: event.target.value,
+                        }
+                      : current,
+                  )
+                }
+                className="rounded-2xl border border-input bg-background px-3 py-2.5"
+              />
+            </label>
+          </form>
         ) : null}
       </Modal>
 
@@ -853,7 +1092,7 @@ export function ProductsPage() {
           {importModal?.result ? (
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
-                <InfoCard label="Productos creados" value={String(importModal.result.successCount)} />
+                <InfoCard label="Productos procesados" value={String(importModal.result.successCount)} />
                 <InfoCard label="Filas con observaciones" value={String(importModal.result.errorCount)} />
               </div>
 
@@ -870,7 +1109,7 @@ export function ProductsPage() {
               ) : (
                 <EmptyState
                   title="Carga completada sin observaciones"
-                  description="Todos los productos del archivo fueron creados correctamente."
+                  description="Todos los productos del archivo fueron creados o actualizados correctamente."
                 />
               )}
             </div>
@@ -886,7 +1125,7 @@ export function ProductsPage() {
           }
         }}
         title="Reducir stock por CSV"
-        description="Descuenta unidades usando codigo de barra y cantidad. Esta accion queda registrada en el historial de inventario."
+        description="Descuenta unidades usando codigo del producto y cantidad. Esta accion queda registrada en el historial de inventario."
         footer={
           <div className="flex flex-wrap justify-end gap-3">
             <button
@@ -923,7 +1162,7 @@ export function ProductsPage() {
         <div className="space-y-5">
           <div className="rounded-[24px] border border-amber-100 bg-amber-50/80 p-4">
             <p className="text-sm font-semibold text-amber-900">Plantilla esperada</p>
-            <p className="mt-1 text-sm text-amber-800">codigo_barra,cantidad</p>
+            <p className="mt-1 text-sm text-amber-800">codigo_producto,cantidad</p>
             <p className="mt-2 text-xs text-amber-700">
               La cantidad siempre debe ser positiva. El sistema la restara del stock actual y rechazara filas que dejarian stock negativo.
             </p>
@@ -1042,7 +1281,7 @@ export function ProductsPage() {
         {editProduct ? (
           <div className="space-y-6">
             <div className="grid gap-3 md:grid-cols-3">
-              <InfoCard label="Codigo de barras" value={editProduct.barcode ?? "Sin codigo"} />
+              <InfoCard label="Codigo del producto" value={editProduct.barcode ?? "Sin codigo"} />
               <InfoCard label="Promocion activa" value={describePromotion(editProduct.promotion ?? null)} />
               <InfoCard label="Ultima actualizacion" value={editProduct.updatedAt ? formatDate(editProduct.updatedAt) : "Sin registro"} />
             </div>
@@ -1121,7 +1360,7 @@ export function ProductsPage() {
           <div className="space-y-6">
             <div className="grid gap-3 md:grid-cols-3">
               <InfoCard label="Producto" value={historyProduct.name} />
-              <InfoCard label="Codigo de barras" value={historyProduct.barcode ?? "Sin codigo"} />
+              <InfoCard label="Codigo del producto" value={historyProduct.barcode ?? "Sin codigo"} />
               <InfoCard label="Ultima actualizacion" value={historyProduct.updatedAt ? formatDate(historyProduct.updatedAt) : "Sin registro"} />
             </div>
 
@@ -1163,7 +1402,7 @@ export function ProductsPage() {
         open={canPrintBarcodes && barcodeModal !== null}
         onClose={() => setBarcodeModal(null)}
         title="Imprimir codigos de barras"
-        description="Genera etiquetas pequenas de 4 x 2,5 cm listas para imprimir y pegar en tus productos."
+        description="Elige el formato de impresion y ajusta la cantidad por producto antes de descargar el PDF."
         footer={
           <div className="flex justify-end gap-3">
             <button
@@ -1185,11 +1424,95 @@ export function ProductsPage() {
         }
       >
         <div className="space-y-4">
+          <div className="rounded-[22px] border border-white/80 bg-background/70 px-4 py-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <label className="grid gap-2 text-sm sm:max-w-xs">
+                <span>Formato de impresion</span>
+                <select
+                  value={barcodeModal?.format ?? "A4"}
+                  onChange={(event) =>
+                    setBarcodeModal((current) =>
+                      current
+                        ? {
+                            ...current,
+                            format: event.target.value as BarcodeModalState["format"],
+                          }
+                        : current,
+                    )
+                  }
+                  className="rounded-2xl border border-input bg-background px-3 py-2"
+                >
+                  <option value="A4">Hoja A4</option>
+                  <option value="LETTER">Hoja Carta</option>
+                  <option value="LABEL_30X20">Etiqueta 30 x 20 mm</option>
+                </select>
+              </label>
+              <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                <span className="soft-chip">{barcodeModal?.items.length ?? 0} productos</span>
+                <span className="soft-chip">{totalBarcodeLabels} etiquetas</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBarcodeModal((current) =>
+                      current
+                        ? {
+                            ...current,
+                            items: current.items.map((item) => ({ ...item, quantity: "1" })),
+                          }
+                        : current,
+                    )
+                  }
+                  className="rounded-full border border-white/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5"
+                >
+                  Poner 1 a todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBarcodeModal((current) =>
+                      current
+                        ? {
+                            ...current,
+                            items: current.items.map((item) => ({ ...item, quantity: String(item.stockQuantity) })),
+                          }
+                        : current,
+                    )
+                  }
+                  className="rounded-full border border-white/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5"
+                >
+                  Usar stock actual
+                </button>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {barcodeModal?.format === "LABEL_30X20"
+                ? "Prueba compacta para etiquetadora: nombre pequeno, precio y codigo del producto."
+                : barcodeModal?.format === "LETTER"
+                  ? "Distribucion compacta en hoja Carta."
+                  : "Distribucion compacta en hoja A4."}
+            </p>
+            {totalBarcodeLabels > 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Esta descarga se preparara en {estimatedBarcodeFiles} archivo(s) de hasta {MAX_LABELS_PER_BARCODE_FILE} etiquetas por PDF.
+              </p>
+            ) : null}
+            {barcodeHeavyDownload ? (
+              <p className="mt-2 text-xs font-medium text-amber-700">
+                Estas por generar {totalBarcodeLabels} etiquetas. Si tarda demasiado, usa "Poner 1 a todos" o reduce algunas cantidades antes de descargar.
+              </p>
+            ) : null}
+          </div>
           {barcodeModal?.items.map((item) => (
             <div key={item.productId} className="flex flex-col gap-3 rounded-[22px] border border-white/80 bg-background/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-medium">{item.productName}</p>
-                <p className="text-sm text-muted-foreground">Formato compacto de 4 x 2,5 cm en hoja A4.</p>
+                <p className="text-sm text-muted-foreground">
+                  {barcodeModal?.format === "LABEL_30X20"
+                    ? "Etiqueta termica compacta de 30 x 20 mm."
+                    : barcodeModal?.format === "LETTER"
+                      ? "Formato compacto de 4 x 2,5 cm en hoja Carta."
+                      : "Formato compacto de 4 x 2,5 cm en hoja A4."}
+                </p>
               </div>
               <label className="grid gap-2 text-sm sm:w-36">
                 <span>Cantidad</span>
@@ -1201,6 +1524,7 @@ export function ProductsPage() {
                     setBarcodeModal((current) =>
                       current
                         ? {
+                            ...current,
                             items: current.items.map((candidate) =>
                               candidate.productId === item.productId ? { ...candidate, quantity: event.target.value } : candidate,
                             ),
@@ -1594,9 +1918,9 @@ function downloadTemplate() {
 
 function downloadStockReductionTemplate() {
   const content = [
-    "codigo_barra,cantidad",
-    "7501234567890,2",
-    "7501234567891,1",
+    "codigo_producto,cantidad",
+    "0000123,2",
+    "0000456,1",
   ].join("\n");
 
   const blob = new Blob([`\uFEFF${content}`], { type: "text/csv;charset=utf-8;" });
@@ -1686,4 +2010,52 @@ function getErrorMessage(error: unknown, fallback: string) {
     return error.message;
   }
   return fallback;
+}
+
+function splitBarcodeItemsIntoBatches(
+  items: Array<{ productId: number; quantity: number }>,
+  maxLabelsPerBatch: number,
+) {
+  const sanitizedItems = items
+    .map((item) => ({
+      productId: item.productId,
+      quantity: Number.isFinite(item.quantity) ? Math.max(0, Math.floor(item.quantity)) : 0,
+    }))
+    .filter((item) => item.quantity > 0);
+
+  if (sanitizedItems.length === 0) {
+    return [];
+  }
+
+  const batches: Array<Array<{ productId: number; quantity: number }>> = [];
+  let currentBatch: Array<{ productId: number; quantity: number }> = [];
+  let currentBatchSize = 0;
+
+  for (const item of sanitizedItems) {
+    let remainingQuantity = item.quantity;
+
+    while (remainingQuantity > 0) {
+      const remainingCapacity = maxLabelsPerBatch - currentBatchSize;
+      const quantityForBatch = Math.min(remainingQuantity, remainingCapacity);
+
+      currentBatch.push({
+        productId: item.productId,
+        quantity: quantityForBatch,
+      });
+      currentBatchSize += quantityForBatch;
+      remainingQuantity -= quantityForBatch;
+
+      if (currentBatchSize >= maxLabelsPerBatch) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchSize = 0;
+      }
+    }
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
 }

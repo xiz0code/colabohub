@@ -32,7 +32,7 @@ class BarcodeLabelPdfServiceTest {
                 null,
                 12,
                 ProductStatus.ACTIVE,
-                "7500000000100",
+                "0000010",
                 false,
                 null,
                 Instant.now(),
@@ -40,12 +40,46 @@ class BarcodeLabelPdfServiceTest {
 
         BarcodeLabelRequest request = new BarcodeLabelRequest(
                 List.of(new BarcodeLabelRequest.BarcodeLabelItemRequest(10L, 2)),
-                true);
+                true,
+                BarcodeLabelRequest.BarcodeLabelFormat.A4);
 
         byte[] pdf = barcodeLabelPdfService.generateLabels(List.of(product), request);
 
         String header = new String(pdf, 0, 8, StandardCharsets.ISO_8859_1);
         assertThat(header).startsWith("%PDF-1.4");
         assertThat(pdf.length).isGreaterThan(500);
+    }
+
+    @Test
+    void shouldGenerateCompact30x20Labels() {
+        ProductResponse product = new ProductResponse(
+                10L,
+                5L,
+                "Sakura Store",
+                7L,
+                "Camila",
+                "Photocard BTS",
+                "STK-BTS",
+                "Pack coleccionable",
+                new BigDecimal("1000"),
+                null,
+                12,
+                ProductStatus.ACTIVE,
+                "0000010",
+                false,
+                null,
+                Instant.now(),
+                Instant.now());
+
+        BarcodeLabelRequest request = new BarcodeLabelRequest(
+                List.of(new BarcodeLabelRequest.BarcodeLabelItemRequest(10L, 1)),
+                false,
+                BarcodeLabelRequest.BarcodeLabelFormat.LABEL_30X20);
+
+        byte[] pdf = barcodeLabelPdfService.generateLabels(List.of(product), request);
+
+        String header = new String(pdf, 0, 8, StandardCharsets.ISO_8859_1);
+        assertThat(header).startsWith("%PDF-1.4");
+        assertThat(pdf.length).isGreaterThan(300);
     }
 }

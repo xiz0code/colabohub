@@ -27,7 +27,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ProductStockReductionImportService {
 
-    private static final String EXPECTED_HEADER = "codigo_barra,cantidad";
+    private static final java.util.Set<String> EXPECTED_HEADERS = java.util.Set.of(
+            "codigo_producto,cantidad",
+            "codigo_barra,cantidad");
 
     private final ProductImportService productImportService;
     private final ProductRepository productRepository;
@@ -59,12 +61,12 @@ public class ProductStockReductionImportService {
 
                 List<String> values = productImportService.parseCsvLine(line);
                 if (values.size() != 2) {
-                    errors.add(new ProductImportErrorResponse(rowNumber, line, "La fila debe tener codigo_barra y cantidad."));
+                    errors.add(new ProductImportErrorResponse(rowNumber, line, "La fila debe tener codigo_producto y cantidad."));
                     continue;
                 }
 
                 try {
-                    String barcode = requiredValue(values.get(0), "Ingresa el codigo de barra.");
+                    String barcode = requiredValue(values.get(0), "Ingresa el codigo del producto.");
                     int quantity = parseQuantity(values.get(1));
                     Boolean adjusted = transactionTemplate.execute(status -> {
                         reduceStock(barcode, quantity);
@@ -87,7 +89,7 @@ public class ProductStockReductionImportService {
     private void reduceStock(String barcode, int quantity) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         var product = productRepository.findByBarcodeForPos(tenantId, barcode.trim(), ProductStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException("No encontramos un producto activo con ese codigo de barra."));
+                .orElseThrow(() -> new BusinessException("No encontramos un producto activo con ese codigo."));
         requireProductMarketAccess(product.getStore());
         inventoryService.adjustStock(new StockAdjustmentRequest(product.getId(), -quantity, "REDUCCION_MASIVA_CSV"));
     }
@@ -101,8 +103,8 @@ public class ProductStockReductionImportService {
     }
 
     private void validateHeader(String header) {
-        if (header == null || !EXPECTED_HEADER.equalsIgnoreCase(header.strip())) {
-            throw new BusinessException("La plantilla no coincide. Usa las columnas codigo_barra,cantidad.");
+        if (header == null || !EXPECTED_HEADERS.contains(header.strip().toLowerCase())) {
+            throw new BusinessException("La plantilla no coincide. Usa las columnas codigo_producto,cantidad.");
         }
     }
 

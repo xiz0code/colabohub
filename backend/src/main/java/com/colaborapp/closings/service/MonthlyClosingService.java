@@ -58,11 +58,7 @@ public class MonthlyClosingService {
     @Transactional
     public MonthlyClosingResponse closeMonth(Long marketId, YearMonth month, String closedBy) {
         YearMonth effectiveMonth = month == null ? YearMonth.now(businessZone) : month;
-        LocalDate closingMonth = effectiveMonth.atDay(1);
-        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
-        return monthlyClosingRepository.findByMarketIdAndClosingMonthWithMarket(tenantId, marketId, closingMonth)
-                .map(this::toResponse)
-                .orElseGet(() -> createClosing(marketId, effectiveMonth, closedBy));
+        return persistClosing(marketId, effectiveMonth, closedBy);
     }
 
     @Transactional(readOnly = true)
@@ -77,39 +73,39 @@ public class MonthlyClosingService {
         return toResponse(closing);
     }
 
-    private MonthlyClosingResponse createClosing(Long marketId, YearMonth month, String closedBy) {
+    @Transactional(readOnly = true)
+    public MonthlyClosingResponse previewMonth(Long marketId, YearMonth month) {
+        YearMonth effectiveMonth = month == null ? YearMonth.now(businessZone) : month;
+        ClosingSnapshot snapshot = buildSnapshot(marketId, effectiveMonth);
+        return toResponse(snapshot.market(), effectiveMonth.atDay(1), null, "Vista previa", snapshot.collaboratorSummaries());
+    }
+
+    private MonthlyClosingResponse persistClosing(Long marketId, YearMonth month, String closedBy) {
+        ClosingSnapshot snapshot = buildSnapshot(marketId, month);
+        LocalDate closingMonth = month.atDay(1);
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
-        Market market = marketRepository.findByIdAndTenantId(marketId, tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException("La tienda solicitada no existe o no tienes acceso a ella."));
+        MonthlyClosing closing = monthlyClosingRepository.findByMarketIdAndClosingMonthWithMarket(tenantId, marketId, closingMonth)
+                .orElseGet(MonthlyClosing::new);
 
-        Instant startAt = month.atDay(1).atStartOfDay(businessZone).toInstant();
-        Instant endAt = month.plusMonths(1).atDay(1).atStartOfDay(businessZone).toInstant();
-        List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
-                collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
-
-        MonthlyClosing closing = new MonthlyClosing();
-        closing.setMarket(market);
-        closing.setClosingMonth(month.atDay(1));
-        closing.setSaleCount(collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum());
-        closing.setTotalSalesAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()));
-        closing.setTotalCommissionAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()));
-        closing.setTotalNetAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()));
-        closing.setTotalIvaAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalIvaAmount).toList()));
-        closing.setTotalIvaToPayAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::ivaToPayAmount).toList()));
+        closing.setMarket(snapshot.market());
+        closing.setClosingMonth(closingMonth);
+        applyTotals(closing, snapshot.collaboratorSummaries());
         closing.setClosedAt(Instant.now());
         closing.setClosedBy(closedBy);
         monthlyClosingRepository.save(closing);
 
-        List<MonthlyClosingCollaborator> collaborators = collaboratorSummaries.stream()
+        monthlyClosingCollaboratorRepository.deleteByMonthlyClosingId(closing.getId());
+
+        List<MonthlyClosingCollaborator> collaborators = snapshot.collaboratorSummaries().stream()
                 .map(summary -> toCollaboratorRow(closing, summary))
                 .toList();
         if (!collaborators.isEmpty()) {
             monthlyClosingCollaboratorRepository.saveAll(collaborators);
         }
 
-        for (CollaboratorSalesSummaryService.CollaboratorSummary summary : collaboratorSummaries) {
+        for (CollaboratorSalesSummaryService.CollaboratorSummary summary : snapshot.collaboratorSummaries()) {
             try {
-                collaboratorClosingEmailService.sendMonthlySummary(market.getName(), month.atDay(1), summary);
+                collaboratorClosingEmailService.sendMonthlySummary(snapshot.market().getName(), month.atDay(1), summary);
             } catch (Exception exception) {
                 log.warn("Monthly closing email could not be sent to collaborator {} for market {} and month {}.",
                         summary.collaboratorEmail(),
@@ -120,6 +116,28 @@ public class MonthlyClosingService {
         }
 
         return toResponse(closing, collaborators);
+    }
+
+    private ClosingSnapshot buildSnapshot(Long marketId, YearMonth month) {
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        Market market = marketRepository.findByIdAndTenantId(marketId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("La tienda solicitada no existe o no tienes acceso a ella."));
+
+        Instant startAt = month.atDay(1).atStartOfDay(businessZone).toInstant();
+        Instant endAt = month.plusMonths(1).atDay(1).atStartOfDay(businessZone).toInstant();
+        List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
+                collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
+
+        return new ClosingSnapshot(market, collaboratorSummaries);
+    }
+
+    private void applyTotals(MonthlyClosing closing, List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
+        closing.setSaleCount(collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum());
+        closing.setTotalSalesAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()));
+        closing.setTotalCommissionAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()));
+        closing.setTotalNetAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()));
+        closing.setTotalIvaAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalIvaAmount).toList()));
+        closing.setTotalIvaToPayAmount(sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::ivaToPayAmount).toList()));
     }
 
     private MonthlyClosingCollaborator toCollaboratorRow(
@@ -176,7 +194,46 @@ public class MonthlyClosingService {
                         .toList());
     }
 
+    private MonthlyClosingResponse toResponse(
+            Market market,
+            LocalDate closingMonth,
+            Instant closedAt,
+            String closedBy,
+            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
+        return new MonthlyClosingResponse(
+                market.getId(),
+                market.getName(),
+                closingMonth,
+                collaboratorSummaries.stream().mapToLong(CollaboratorSalesSummaryService.CollaboratorSummary::saleCount).sum(),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalSalesAmount).toList()),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalCommissionAmount).toList()),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalIvaAmount).toList()),
+                sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::ivaToPayAmount).toList()),
+                closedAt,
+                closedBy,
+                collaboratorSummaries.stream()
+                        .map(summary -> new MonthlyClosingCollaboratorResponse(
+                                summary.collaboratorUserId(),
+                                summary.collaboratorName(),
+                                summary.collaboratorEmail(),
+                                summary.factura(),
+                                summary.saleCount(),
+                                summary.totalItems(),
+                                summary.totalSalesAmount(),
+                                summary.totalCommissionAmount(),
+                                summary.totalNetAmount(),
+                                summary.totalIvaAmount(),
+                                summary.ivaToPayAmount()))
+                        .toList());
+    }
+
     private BigDecimal sum(List<BigDecimal> values) {
         return values.stream().reduce(ZERO, BigDecimal::add);
+    }
+
+    private record ClosingSnapshot(
+            Market market,
+            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
     }
 }

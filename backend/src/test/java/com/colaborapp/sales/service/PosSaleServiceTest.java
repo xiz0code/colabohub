@@ -47,6 +47,7 @@ import com.colaborapp.sales.repository.SaleItemRepository;
 import com.colaborapp.sales.repository.SaleRepository;
 import com.colaborapp.sales.repository.SaleStoreSummaryRepository;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
+import com.colaborapp.sales.web.dto.PosManualSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosPaymentMethodUpdateRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemRequest;
 import com.colaborapp.sales.web.dto.PosSaleItemUpdateRequest;
@@ -56,6 +57,7 @@ import com.colaborapp.settings.service.CommissionSettingsService;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.stores.domain.StoreStatus;
 import com.colaborapp.stores.domain.StoreType;
+import com.colaborapp.stores.repository.StoreRepository;
 import com.colaborapp.tenant.domain.Tenant;
 import com.colaborapp.users.domain.RoleCode;
 import com.colaborapp.users.domain.User;
@@ -74,6 +76,9 @@ class PosSaleServiceTest {
 
     @Mock
     private ProductRepository productRepository;
+
+    @Mock
+    private StoreRepository storeRepository;
 
     @Mock
     private StockMovementRepository stockMovementRepository;
@@ -304,9 +309,53 @@ class PosSaleServiceTest {
         SaleItem saved = itemCaptor.getValue();
         assertThat(saved.getProductNameSnapshot()).isEqualTo("Aro Flor");
         assertThat(saved.getProductSkuSnapshot()).isEqualTo("ANA-001");
-        assertThat(saved.getProductBarcodeSnapshot()).isEqualTo("7500000000101");
+        assertThat(saved.getProductBarcodeSnapshot()).isEqualTo("0001000");
         assertThat(saved.getStore()).isEqualTo(storeAna);
         assertThat(response.items()).hasSize(1);
+    }
+
+    @Test
+    void shouldAddManualItemUsingCollaboratorSnapshotWhenProvided() {
+        Sale sale = openSale(1L);
+        SaleItem persistedItem = manualSaleItem(sale, storeAna, "Retiro BW2", "pickup:3", "Butterfly", 22L, "7900.00");
+        SaleStoreSummary summary = summary(sale, storeAna, 1, 1, "7900.00", "0.00", "7900.00");
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
+        when(storeRepository.findByIdAndTenantId(storeAna.getId(), 1L)).thenReturn(Optional.of(storeAna));
+        when(saleItemRepository.findBySaleIdAndManualReference(1L, "pickup:3")).thenReturn(Optional.empty());
+        when(saleItemRepository.save(any(SaleItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(saleItemRepository.findAllBySaleIdWithDetails(1L)).thenReturn(List.of(persistedItem));
+        when(posPricingService.calculateSalePricing(any(), eq(PaymentMethod.CASH), eq(null)))
+                .thenReturn(new PosPricingService.RecalculationResult(
+                        new BigDecimal("7900.00"),
+                        BigDecimal.ZERO.setScale(2),
+                        new BigDecimal("7900.00"),
+                        BigDecimal.ZERO.setScale(0),
+                        new BigDecimal("7900.00"),
+                        List.of(summary)));
+        when(saleStoreSummaryRepository.findAllBySaleIdWithStore(1L)).thenReturn(List.of());
+        when(saleStoreSummaryRepository.findBySaleIdAndStoreId(1L, storeAna.getId())).thenReturn(Optional.empty());
+
+        PosSaleResponse response = posSaleService.addManualItem(
+                1L,
+                new PosManualSaleItemRequest(
+                        storeAna.getId(),
+                        "Retiro BW2",
+                        "posters, sets",
+                        new BigDecimal("7900.00"),
+                        "pickup:3",
+                        1,
+                        22L,
+                        "Butterfly"));
+
+        ArgumentCaptor<SaleItem> itemCaptor = ArgumentCaptor.forClass(SaleItem.class);
+        verify(saleItemRepository).save(itemCaptor.capture());
+        SaleItem saved = itemCaptor.getValue();
+        assertThat(saved.getCollaboratorUserId()).isEqualTo(22L);
+        assertThat(saved.getCollaboratorNameSnapshot()).isEqualTo("Butterfly");
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().getFirst().collaboratorName()).isEqualTo("Butterfly");
     }
 
     @Test
@@ -465,7 +514,6 @@ class PosSaleServiceTest {
         when(saleRepository.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(sale));
         when(saleItemRepository.findAllBySaleIdWithDetails(1L)).thenReturn(List.of(item));
         when(saleStoreSummaryRepository.findAllBySaleIdWithStore(1L)).thenReturn(List.of());
-        when(productRepository.findAllByTenantIdAndIdInForUpdate(1L, List.of(productAna.getId()))).thenReturn(List.of(productAna));
 
         PosSaleResponse response = posSaleService.cancel(1L, "Cliente se arrepintio");
 
@@ -519,12 +567,30 @@ class PosSaleServiceTest {
     void cannotEditConfirmedSale() {
         Sale sale = openSale(10L);
         sale.setStatus(SaleStatus.CONFIRMED);
+        sale.setMarket(marketA);
+        productAna.setStock(8);
+        SaleItem item = saleItem(sale, productAna, 2, "24000.00");
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(saleRepository.findByIdAndTenantId(10L, 1L)).thenReturn(Optional.of(sale));
+        when(saleRepository.findFirstByTenantIdAndMarketIdAndStatusOrderByOpenedAtDesc(1L, marketA.getId(), SaleStatus.OPEN))
+                .thenReturn(Optional.empty());
+        when(saleRepository.findFirstByTenantIdAndMarketIsNullAndStatusOrderByOpenedAtDesc(1L, SaleStatus.OPEN))
+                .thenReturn(Optional.empty());
+        when(saleItemRepository.findAllBySaleIdWithDetails(10L)).thenReturn(List.of(item));
+        when(saleStoreSummaryRepository.findAllBySaleIdWithStore(10L)).thenReturn(List.of());
+        when(productRepository.findAllByTenantIdAndIdInForUpdate(1L, List.of(productAna.getId()))).thenReturn(List.of(productAna));
 
-        assertThatThrownBy(() -> posSaleService.addItem(10L, new PosSaleItemRequest(99L, 1)))
-                .isInstanceOf(BusinessException.class)
-                .hasMessage("Only open sales can be modified. Current status: CONFIRMED.");
+        PosSaleResponse response = posSaleService.editSale(10L);
+
+        assertThat(response.status()).isEqualTo(SaleStatus.OPEN);
+        assertThat(sale.getStatus()).isEqualTo(SaleStatus.OPEN);
+        assertThat(sale.getConfirmedAt()).isNull();
+        assertThat(productAna.getStock()).isEqualTo(10);
+
+        ArgumentCaptor<StockMovement> movementCaptor = ArgumentCaptor.forClass(StockMovement.class);
+        verify(stockMovementRepository).save(movementCaptor.capture());
+        assertThat(movementCaptor.getValue().getReferenceType()).isEqualTo("SALE_EDIT_REOPEN");
+        assertThat(movementCaptor.getValue().getQuantity()).isEqualTo(2);
     }
 
     @Test
@@ -534,9 +600,27 @@ class PosSaleServiceTest {
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
         when(saleRepository.findByIdAndTenantId(11L, 1L)).thenReturn(Optional.of(sale));
 
-        assertThatThrownBy(() -> posSaleService.updatePaymentMethod(11L, new PosPaymentMethodUpdateRequest(PaymentMethod.DEBITO)))
+        assertThatThrownBy(() -> posSaleService.editSale(11L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("Only open sales can be modified. Current status: CANCELLED.");
+                .hasMessage("Cancelled sales cannot be edited.");
+    }
+
+    @Test
+    void shouldBlockEditingConfirmedSaleWhenAnotherOpenSaleExists() {
+        Sale confirmedSale = openSale(15L);
+        confirmedSale.setStatus(SaleStatus.CONFIRMED);
+        confirmedSale.setMarket(marketA);
+        Sale otherOpenSale = openSale(16L);
+        otherOpenSale.setMarket(marketA);
+
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.findByIdAndTenantId(15L, 1L)).thenReturn(Optional.of(confirmedSale));
+        when(saleRepository.findFirstByTenantIdAndMarketIdAndStatusOrderByOpenedAtDesc(1L, marketA.getId(), SaleStatus.OPEN))
+                .thenReturn(Optional.of(otherOpenSale));
+
+        assertThatThrownBy(() -> posSaleService.editSale(15L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Ya existe otra venta abierta en este Espacio. Cierrala o anulala antes de editar una venta confirmada.");
     }
 
     @Test
@@ -762,6 +846,7 @@ class PosSaleServiceTest {
         product.setStore(store);
         product.setName(name);
         product.setSku(sku);
+        product.setShortBarcode(String.format("%07d", id));
         product.setBarcode(barcode);
         product.setStatus(ProductStatus.ACTIVE);
         product.setStock(stock);
@@ -778,9 +863,43 @@ class PosSaleServiceTest {
         item.setStore(product.getStore());
         item.setProductNameSnapshot(product.getName());
         item.setProductSkuSnapshot(product.getSku());
-        item.setProductBarcodeSnapshot(product.getBarcode());
+        item.setProductBarcodeSnapshot(product.getShortBarcode());
         item.setQuantity(quantity);
         item.setBaseUnitPrice(product.getSalePrice());
+        item.setLineBaseSubtotal(new BigDecimal(subtotal));
+        item.setPromotionDiscountAmount(BigDecimal.ZERO.setScale(2));
+        item.setSubtotal(new BigDecimal(subtotal));
+        item.setPricingType(SaleItemPricingType.NORMAL);
+        item.setCommission1Amount(BigDecimal.ZERO.setScale(0));
+        item.setCommission2Amount(BigDecimal.ZERO.setScale(0));
+        item.setCommissionIvaAmount(BigDecimal.ZERO.setScale(0));
+        item.setTotalCommissionAmount(BigDecimal.ZERO.setScale(0));
+        item.setNetAmount(new BigDecimal(subtotal));
+        return item;
+    }
+
+    private SaleItem manualSaleItem(
+            Sale sale,
+            Store store,
+            String productName,
+            String reference,
+            String collaboratorName,
+            Long collaboratorUserId,
+            String subtotal) {
+        SaleItem item = new SaleItem();
+        item.setId(9000L);
+        item.setSale(sale);
+        item.setProduct(null);
+        item.setStore(store);
+        item.setManualEntry(true);
+        item.setManualReference(reference);
+        item.setProductNameSnapshot(productName);
+        item.setCollaboratorNameSnapshot(collaboratorName);
+        item.setCollaboratorUserId(collaboratorUserId);
+        item.setProductSkuSnapshot("RETIRO");
+        item.setProductBarcodeSnapshot("");
+        item.setQuantity(1);
+        item.setBaseUnitPrice(new BigDecimal(subtotal));
         item.setLineBaseSubtotal(new BigDecimal(subtotal));
         item.setPromotionDiscountAmount(BigDecimal.ZERO.setScale(2));
         item.setSubtotal(new BigDecimal(subtotal));

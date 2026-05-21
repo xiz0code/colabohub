@@ -24,6 +24,7 @@ import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.colaborapp.common.exception.BusinessException;
+import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.products.web.dto.ProductCreateRequest;
@@ -180,9 +181,12 @@ class ProductImportServiceTest {
     }
 
     @Test
-    void shouldSkipExistingProductByNameAndCollaboratorDuringMassImport() {
+    void shouldIncreaseExistingProductStockByNameAndCollaboratorDuringMassImport() {
         when(userRepository.findWithAccessByEmailIgnoreCase("camila@example.com")).thenReturn(Optional.of(collaborator));
-        when(productRepository.existsByOwnerUserIdAndNameIgnoreCaseAndStatus(15L, "Tazon", ProductStatus.ACTIVE)).thenReturn(true);
+        Product existingProduct = new Product();
+        existingProduct.setId(40L);
+        when(productRepository.findByOwnerUserIdAndNameIgnoreCaseAndStatus(15L, "Tazon", ProductStatus.ACTIVE))
+                .thenReturn(Optional.of(existingProduct));
 
         MockMultipartFile file = new MockMultipartFile(
                 "file",
@@ -197,12 +201,15 @@ class ProductImportServiceTest {
         var response = productImportService.importCsv(file);
 
         verify(productService, org.mockito.Mockito.never()).createProduct(any());
-        assertThat(response.successCount()).isZero();
-        assertThat(response.errorCount()).isEqualTo(1);
-        assertThat(response.errors()).singleElement().satisfies(error -> {
-            assertThat(error.rowNumber()).isEqualTo(2);
-            assertThat(error.message()).isEqualTo("Producto ya existe para esta Tienda. No se duplico.");
-        });
+        verify(productService).mergeImportedProduct(
+                40L,
+                new BigDecimal("4000.00"),
+                14,
+                "Tazon Mango Normal",
+                "",
+                null);
+        assertThat(response.successCount()).isEqualTo(1);
+        assertThat(response.errorCount()).isZero();
     }
 
     @Test

@@ -13,11 +13,16 @@ vi.mock("@/features/auth/session/SessionProvider", () => ({
 
 vi.mock("@/features/products/api/productApi", () => ({
   listProducts: vi.fn(),
+  listPromotionGroups: vi.fn(),
+  deletePromotionGroup: vi.fn(),
   createProduct: vi.fn(),
   updateProduct: vi.fn(),
+  updateProductStatus: vi.fn(),
+  increaseProductStock: vi.fn(),
   getProductAudit: vi.fn(),
   printBarcodeLabels: vi.fn(),
   importProductsCsv: vi.fn(),
+  importStockReductionsCsv: vi.fn(),
 }));
 
 vi.mock("@/features/users/api/userApi", () => ({
@@ -27,9 +32,13 @@ vi.mock("@/features/users/api/userApi", () => ({
 import {
   createProduct,
   getProductAudit,
+  increaseProductStock,
   importProductsCsv,
+  importStockReductionsCsv,
   listProducts,
+  listPromotionGroups,
   printBarcodeLabels,
+  updateProductStatus,
   updateProduct,
 } from "@/features/products/api/productApi";
 import { listUsers } from "@/features/users/api/userApi";
@@ -161,6 +170,45 @@ describe("ProductsPage", () => {
     });
 
     vi.mocked(printBarcodeLabels).mockResolvedValue(new Blob(["pdf"]));
+    vi.mocked(listPromotionGroups).mockResolvedValue([]);
+    vi.mocked(updateProductStatus).mockResolvedValue({
+      id: 10,
+      storeId: 5,
+      storeName: "Sakura Store",
+      ownerUserId: 7,
+      ownerFullName: "Camila",
+      name: "Sticker BTS",
+      sku: "STICKER-BTS",
+      description: "Pack brillante",
+      salePrice: 2000,
+      cost: null,
+      stock: 12,
+      status: "INACTIVE",
+      barcode: "7500000000100",
+      hasPromotion: true,
+      promotion: null,
+      createdAt: "2026-03-16T10:00:00Z",
+      updatedAt: "2026-03-16T11:00:00Z",
+    });
+    vi.mocked(increaseProductStock).mockResolvedValue({
+      id: 10,
+      storeId: 5,
+      storeName: "Sakura Store",
+      ownerUserId: 7,
+      ownerFullName: "Camila",
+      name: "Sticker BTS",
+      sku: "STICKER-BTS",
+      description: "Pack brillante",
+      salePrice: 2000,
+      cost: null,
+      stock: 18,
+      status: "ACTIVE",
+      barcode: "7500000000100",
+      hasPromotion: true,
+      promotion: null,
+      createdAt: "2026-03-16T10:00:00Z",
+      updatedAt: "2026-03-16T11:00:00Z",
+    });
     vi.mocked(importProductsCsv).mockResolvedValue({
       successCount: 2,
       errorCount: 1,
@@ -171,6 +219,11 @@ describe("ProductsPage", () => {
           message: "El precio debe ser un numero mayor a 0.",
         },
       ],
+    });
+    vi.mocked(importStockReductionsCsv).mockResolvedValue({
+      successCount: 1,
+      errorCount: 0,
+      errors: [],
     });
     vi.stubGlobal("URL", {
       createObjectURL: vi.fn(() => "blob:url"),
@@ -225,6 +278,21 @@ describe("ProductsPage", () => {
     expect(screen.getByText(/1000/)).toBeInTheDocument();
   });
 
+  it("opens quick stock increase and sends the quantity", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("button", { name: "Aumentar stock" });
+    await user.click(screen.getByRole("button", { name: "Aumentar stock" }));
+    await user.clear(screen.getByLabelText("Cuantas unidades quieres agregar"));
+    await user.type(screen.getByLabelText("Cuantas unidades quieres agregar"), "6");
+    await user.click(screen.getByRole("button", { name: "Agregar unidades" }));
+
+    await waitFor(() => {
+      expect(increaseProductStock).toHaveBeenCalledWith(10, 6);
+    });
+  });
+
   it("opens barcode modal for selected products", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -233,7 +301,111 @@ describe("ProductsPage", () => {
     await user.click(screen.getByRole("button", { name: "Imprimir codigos" }));
 
     expect(screen.getByRole("heading", { name: "Imprimir codigos de barras" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("1")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("12")).toBeInTheDocument();
+    expect(screen.getByLabelText("Formato de impresion")).toHaveValue("A4");
+  });
+
+  it("sends the selected barcode print format", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("button", { name: "Imprimir codigos" });
+    await user.click(screen.getByRole("button", { name: "Imprimir codigos" }));
+    await user.selectOptions(screen.getByLabelText("Formato de impresion"), "LABEL_30X20");
+    await user.click(screen.getByRole("button", { name: "Descargar PDF" }));
+
+    await waitFor(() => {
+      expect(printBarcodeLabels).toHaveBeenCalledWith(
+        expect.objectContaining({
+          format: "LABEL_30X20",
+          items: [{ productId: 10, quantity: 12 }],
+        }),
+      );
+    });
+  });
+
+  it("splits massive barcode downloads into multiple pdf files", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("button", { name: "Imprimir codigos" });
+    await user.click(screen.getByRole("button", { name: "Imprimir codigos" }));
+    await user.clear(screen.getByLabelText("Cantidad"));
+    await user.type(screen.getByLabelText("Cantidad"), "500");
+    await user.click(screen.getByRole("button", { name: "Descargar PDF" }));
+
+    await waitFor(() => {
+      expect(printBarcodeLabels).toHaveBeenCalledTimes(3);
+    });
+
+    expect(printBarcodeLabels).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        items: [{ productId: 10, quantity: 240 }],
+      }),
+    );
+    expect(printBarcodeLabels).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        items: [{ productId: 10, quantity: 240 }],
+      }),
+    );
+    expect(printBarcodeLabels).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        items: [{ productId: 10, quantity: 20 }],
+      }),
+    );
+  });
+
+  it("paginates the product catalog when there are more than 100 products", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listProducts).mockResolvedValue({
+      content: [
+        {
+          id: 10,
+          storeId: 5,
+          storeName: "Sakura Store",
+          ownerUserId: 7,
+          ownerFullName: "Camila",
+          name: "Sticker BTS",
+          sku: "STICKER-BTS",
+          description: "Pack brillante",
+          salePrice: 2000,
+          cost: null,
+          stock: 12,
+          status: "ACTIVE",
+          barcode: "7500000000100",
+          hasPromotion: false,
+          promotion: null,
+          createdAt: "2026-03-16T10:00:00Z",
+          updatedAt: "2026-03-16T11:00:00Z",
+        },
+      ],
+      page: 0,
+      size: 100,
+      totalElements: 125,
+      totalPages: 2,
+      first: true,
+      last: false,
+      empty: false,
+    });
+
+    renderPage();
+
+    expect(await screen.findByText(/Mostrando página/)).toBeInTheDocument();
+    expect(screen.getByText("125")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+
+    await waitFor(() => {
+      expect(listProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          page: 1,
+          size: 100,
+        }),
+      );
+    });
   });
 
   it("imports products from csv and shows row level results", async () => {
@@ -257,7 +429,7 @@ describe("ProductsPage", () => {
       expect(importProductsCsv).toHaveBeenCalledWith(expect.any(File));
     });
 
-    expect(await screen.findByText("Productos creados")).toBeInTheDocument();
+    expect(await screen.findByText("Productos procesados")).toBeInTheDocument();
     expect(screen.getByText("Fila 3")).toBeInTheDocument();
     expect(screen.getByText("El precio debe ser un numero mayor a 0.")).toBeInTheDocument();
   });
@@ -320,7 +492,7 @@ describe("ProductsPage", () => {
     expect(screen.getByText("$2.000")).toBeInTheDocument();
     expect(screen.getByText("Productos con stock bajo")).toBeInTheDocument();
     expect(screen.getAllByText("Album Kpop").length).toBeGreaterThan(0);
-    expect(screen.getByText("2 un.")).toBeInTheDocument();
+    expect(screen.getByText("1 producto(s) en alerta")).toBeInTheDocument();
   });
 
   it("lets a tienda create products and print barcode labels", async () => {

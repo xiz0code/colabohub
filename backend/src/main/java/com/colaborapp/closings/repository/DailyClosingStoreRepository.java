@@ -9,4 +9,6 @@ import com.colaborapp.closings.domain.DailyClosingStore;
 public interface DailyClosingStoreRepository extends JpaRepository<DailyClosingStore, Long> {
 
     List<DailyClosingStore> findByDailyClosingIdOrderByStoreNameSnapshotAsc(Long dailyClosingId);
+
+    void deleteByDailyClosingId(Long dailyClosingId);
 }

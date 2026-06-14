@@ -227,6 +227,7 @@ class ProtectedEndpointsSecurityTest {
                 new BigDecimal("32200.0000"),
                 Instant.parse("2026-03-15T23:00:00Z"),
                 "system",
+                List.of(),
                 List.of(new DailyClosingStoreResponse(
                         10L,
                         "Tienda Ana",

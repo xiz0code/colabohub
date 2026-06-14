@@ -39,9 +39,13 @@ import com.colaborapp.sales.web.dto.PosSaleResponse;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.security.AuthenticatedUserService;
 import com.colaborapp.stores.domain.Store;
+import com.colaborapp.stores.domain.StoreType;
 import com.colaborapp.stores.repository.StoreRepository;
 import com.colaborapp.tenant.domain.Tenant;
+import com.colaborapp.users.domain.Role;
+import com.colaborapp.users.domain.RoleCode;
 import com.colaborapp.users.domain.User;
+import com.colaborapp.users.repository.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
 class PickupServiceTest {
@@ -54,6 +58,9 @@ class PickupServiceTest {
 
     @Mock
     private ProductRepository productRepository;
+
+    @Mock
+    private UserRepository userRepository;
 
     @Mock
     private SaleRepository saleRepository;
@@ -90,6 +97,7 @@ class PickupServiceTest {
         store = new Store();
         store.setId(4L);
         store.setName("Stock principal");
+        store.setType(StoreType.STOCK);
         store.setMarket(market);
 
         pickup = new Pickup();
@@ -151,10 +159,59 @@ class PickupServiceTest {
                 List.of("Espacio Test")));
         when(pickupRepository.search(1L, null, List.of(), true, 22L, null, null)).thenReturn(List.of(pickup));
 
-        List<PickupResponse> responses = pickupService.list(null, null, null);
+        List<PickupResponse> responses = pickupService.list(null, null, null, null);
 
         assertThat(responses).hasSize(1);
         assertThat(responses.getFirst().storeName()).isEqualTo("Butterfly");
+    }
+
+    @Test
+    void shouldLetSystemAdminCreatePickupForCollaborator() {
+        User systemAdmin = new User();
+        systemAdmin.setId(1L);
+        systemAdmin.setEmail("admin@colabohub.cl");
+        systemAdmin.setFullName("Admin General");
+        User collaborator = storeUser(22L, "butterfly@example.com", "Butterfly");
+
+        when(authenticatedUserService.getCurrentUserSnapshot()).thenReturn(new AuthenticatedUserService.CurrentAuthenticatedUser(
+                systemAdmin,
+                List.of("ADMIN_SYSTEM"),
+                true,
+                null,
+                null,
+                List.of(),
+                List.of(),
+                List.of()));
+        when(userRepository.findWithAccessById(22L)).thenReturn(Optional.of(collaborator));
+        when(storeRepository.findFirstByTenantIdAndMarketIdAndType(1L, 2L, StoreType.STOCK)).thenReturn(Optional.of(store));
+        when(pickupRepository.save(any(Pickup.class))).thenAnswer(invocation -> {
+            Pickup saved = invocation.getArgument(0);
+            saved.setId(80L);
+            return saved;
+        });
+
+        PickupResponse response = pickupService.create(null, 22L, "WEB-100", "Cliente", "Pedido web", false, null);
+
+        ArgumentCaptor<Pickup> pickupCaptor = ArgumentCaptor.forClass(Pickup.class);
+        verify(accessControlService).requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.STORE_USER);
+        verify(accessControlService).requireStoreAccess(4L);
+        verify(pickupRepository).save(pickupCaptor.capture());
+        assertThat(response.id()).isEqualTo(80L);
+        assertThat(pickupCaptor.getValue().getStore().getId()).isEqualTo(4L);
+        assertThat(pickupCaptor.getValue().getCollaboratorUserId()).isEqualTo(22L);
+        assertThat(pickupCaptor.getValue().getCollaboratorNameSnapshot()).isEqualTo("Butterfly");
+    }
+
+    @Test
+    void shouldRejectInactiveCollaboratorOnCreate() {
+        User collaborator = storeUser(22L, "butterfly@example.com", "Butterfly");
+        collaborator.setActive(false);
+
+        when(userRepository.findWithAccessById(22L)).thenReturn(Optional.of(collaborator));
+
+        assertThatThrownBy(() -> pickupService.create(null, 22L, "WEB-101", "Cliente", "Pedido web", false, null))
+                .isInstanceOf(com.colaborapp.common.exception.BusinessException.class)
+                .hasMessageContaining("Tienda activa");
     }
 
     @Test
@@ -210,6 +267,21 @@ class PickupServiceTest {
                 List.of(2L),
                 List.of(),
                 List.of("Espacio Test"));
+    }
+
+    private User storeUser(Long id, String email, String fullName) {
+        Role role = new Role();
+        role.setCode(RoleCode.STORE_USER);
+        role.setName("Tienda");
+
+        User user = new User();
+        user.setId(id);
+        user.setEmail(email);
+        user.setFullName(fullName);
+        user.setActive(true);
+        user.getRoles().add(role);
+        user.getMarkets().add(market);
+        return user;
     }
 
     private PosSaleResponse posSale(Long id) {

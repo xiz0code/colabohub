@@ -10,6 +10,12 @@ export type DailyClosingStore = {
   totalItems: number;
 };
 
+export type ClosingPaymentMethodSummary = {
+  paymentMethod: "CASH" | "CREDIT" | "DEBITO" | "TRANSFER";
+  saleCount: number;
+  totalSalesAmount: number;
+};
+
 export type DailyClosing = {
   marketId: number;
   marketName: string;
@@ -20,6 +26,7 @@ export type DailyClosing = {
   totalNetAmount: number;
   closedAt: string | null;
   closedBy: string | null;
+  paymentMethods?: ClosingPaymentMethodSummary[];
   stores: DailyClosingStore[];
 };
 
@@ -49,6 +56,7 @@ export type MonthlyClosing = {
   totalIvaToPayAmount: number;
   closedAt: string | null;
   closedBy: string | null;
+  paymentMethods?: ClosingPaymentMethodSummary[];
   collaborators: MonthlyClosingCollaborator[];
 };
 

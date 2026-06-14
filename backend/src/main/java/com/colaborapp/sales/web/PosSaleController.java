@@ -1,6 +1,7 @@
 package com.colaborapp.sales.web;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -14,6 +15,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
+
+import com.colaborapp.common.web.dto.PageResponse;
 import com.colaborapp.sales.service.PosSaleService;
 import com.colaborapp.sales.web.dto.CancelSaleRequest;
 import com.colaborapp.sales.web.dto.CreatePosSaleRequest;
@@ -32,7 +36,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/pos/sales")
 @RequiredArgsConstructor
-@PreAuthorize("@accessControl.canOperatePos()")
+@PreAuthorize("@accessControl.canReadPosSales()")
 public class PosSaleController {
 
     private final PosSaleService posSaleService;
@@ -44,8 +48,13 @@ public class PosSaleController {
     }
 
     @GetMapping
-    public java.util.List<PosSaleSummaryResponse> listSales() {
-        return posSaleService.listSales();
+    public PageResponse<PosSaleSummaryResponse> listSales(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            @RequestParam(required = false) Long marketId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        return posSaleService.listSales(dateFrom, dateTo, marketId, page, size);
     }
 
     @GetMapping("/open")

@@ -120,6 +120,11 @@ export function StoresPage() {
   };
 
   const handleEdit = (store: Store) => {
+    if (store.type === "STOCK") {
+      setFeedback({ kind: "error", message: "Stock principal es una tienda tecnica y no se edita desde este formulario." });
+      return;
+    }
+
     setEditingStore(store);
     setFormState({
       marketId: String(store.marketId),
@@ -288,7 +293,7 @@ export function StoresPage() {
                             <button
                               type="button"
                               onClick={() => handleEdit(store)}
-                              disabled={statusMutation.isPending || updateStoreMutation.isPending}
+                              disabled={store.type === "STOCK" || statusMutation.isPending || updateStoreMutation.isPending}
                               className="rounded-full border border-border px-3 py-1 text-xs"
                             >
                               Editar

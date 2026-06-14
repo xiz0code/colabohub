@@ -43,7 +43,7 @@ export function PickupsPage() {
   const { user, primaryRole } = useSession();
   const { openPosWithSale } = usePosLauncher();
   const isStoreUser = primaryRole === "STORE_USER";
-  const canCreate = primaryRole === "ADMIN_MARKET" || primaryRole === "STORE_USER";
+  const canCreate = primaryRole === "ADMIN_SYSTEM" || primaryRole === "ADMIN_MARKET" || primaryRole === "STORE_USER";
   const canOperatePickup = primaryRole === "ADMIN_MARKET" || primaryRole === "SELLER";
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PickupStatus | "ALL">("ALL");
@@ -53,30 +53,27 @@ export function PickupsPage() {
   const [feedback, setFeedback] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
 
   const usersQuery = useQuery({
-    queryKey: ["users", "pickup-stores"],
+    queryKey: ["users", "pickup-store-users", user?.activeMarketId],
     queryFn: listUsers,
     enabled: !isStoreUser,
   });
 
   const storeOptions = useMemo(() => {
     if (isStoreUser && user) {
-      return [{ value: String(user.storeIds[0] ?? ""), label: user.fullName }];
+      return [{ value: String(user.id), label: user.fullName }];
     }
 
     return (usersQuery.data ?? [])
       .filter((candidate) => candidate.active && candidate.roles.includes("STORE_USER"))
-      .filter((candidate) => (user?.activeMarketId ? candidate.marketIds.includes(user.activeMarketId) : true))
-      .map((candidate) => ({
-        value: String(candidate.storeIds[0] ?? ""),
-        label: candidate.fullName,
-      }))
-      .filter((option) => option.value)
+      .filter((candidate) => (user?.activeMarketId ? candidate.marketIds.includes(user.activeMarketId) || candidate.storeIds.length > 0 : true))
+      .map((candidate) => ({ value: String(candidate.id), label: candidate.fullName }))
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [isStoreUser, user, usersQuery.data]);
 
   const pickupsQuery = useQuery({
     queryKey: ["pickups", search, status, selectedStoreId],
-    queryFn: () => listPickups({ query: search || undefined, status, storeId: selectedStoreId ? Number(selectedStoreId) : null }),
+    queryFn: () =>
+      listPickups({ query: search || undefined, status, collaboratorUserId: selectedStoreId ? Number(selectedStoreId) : null }),
   });
 
   const inferredStoreOption = isStoreUser ? storeOptions[0] ?? null : null;
@@ -84,7 +81,7 @@ export function PickupsPage() {
   const createMutation = useMutation({
     mutationFn: () =>
       createPickup({
-        ...(isStoreUser ? {} : { storeId: Number(form.storeId) }),
+        ...(isStoreUser ? {} : { collaboratorUserId: Number(form.storeId) }),
         pickupNumber: form.pickupNumber.trim(),
         customerName: form.customerName.trim(),
         description: form.description.trim(),

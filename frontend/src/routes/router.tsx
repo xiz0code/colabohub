@@ -51,11 +51,11 @@ export function AppRouter() {
             <Route path="/closings/monthly" element={<DailyClosingPage defaultMode="monthly" />} />
           </Route>
 
-          <Route element={<RequireRole allowedRoles={["ADMIN_MARKET", "SELLER"]} />}>
+          <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM", "ADMIN_MARKET", "SELLER"]} />}>
             <Route path="/sales" element={<SalesPage />} />
           </Route>
 
-          <Route element={<RequireRole allowedRoles={["ADMIN_MARKET", "SELLER", "STORE_USER"]} />}>
+          <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM", "ADMIN_MARKET", "SELLER", "STORE_USER"]} />}>
             <Route path="/pickups" element={<PickupsPage />} />
           </Route>
 

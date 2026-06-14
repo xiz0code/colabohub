@@ -471,6 +471,8 @@ function DailyClosingPanel({
           <MetricCard label="Total a recibir" value={formatMoney(closing.totalNetAmount)} />
         </div>
 
+        <PaymentMethodBreakdown paymentMethods={closing.paymentMethods ?? []} />
+
         <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
             <h3 className="text-base font-semibold">Pulso del cierre</h3>
@@ -597,6 +599,8 @@ function MonthlyClosingPanel({
           <MetricCard label="IVA total" value={formatMoney(closing.totalIvaAmount)} />
           <MetricCard label="IVA a pagar" value={formatMoney(closing.totalIvaToPayAmount)} />
         </div>
+
+        <PaymentMethodBreakdown paymentMethods={closing.paymentMethods ?? []} />
 
         <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <div className="rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
@@ -747,12 +751,62 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PaymentMethodBreakdown({
+  paymentMethods,
+}: {
+  paymentMethods: NonNullable<DailyClosing["paymentMethods"]>;
+}) {
+  const total = paymentMethods.reduce((sum, paymentMethod) => sum + paymentMethod.totalSalesAmount, 0);
+
+  return (
+    <div className="mt-5 rounded-[24px] border border-white/85 bg-white/70 p-5 shadow-sm">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">Cuadratura por medio de pago</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Recuento de ventas confirmadas para revisar caja, tarjetas y transferencias del periodo.
+          </p>
+        </div>
+        <span className="text-sm font-semibold text-foreground">{formatMoney(total)}</span>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {paymentMethods.map((paymentMethod) => (
+          <div
+            key={paymentMethod.paymentMethod}
+            className="rounded-[20px] border border-white/80 bg-white/75 p-4 shadow-sm"
+          >
+            <p className="text-sm text-muted-foreground">{formatPaymentMethodLabel(paymentMethod.paymentMethod)}</p>
+            <p className="mt-2 text-lg font-semibold">{formatMoney(paymentMethod.totalSalesAmount)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{paymentMethod.saleCount} venta(s)</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-CL", {
     style: "currency",
     currency: "CLP",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatPaymentMethodLabel(paymentMethod: string) {
+  switch (paymentMethod) {
+    case "CASH":
+      return "Efectivo";
+    case "DEBITO":
+      return "Debito";
+    case "CREDIT":
+      return "Credito";
+    case "TRANSFER":
+      return "Transferencia";
+    default:
+      return paymentMethod;
+  }
 }
 
 function formatClosingStatus(closedAt: string | null, closedBy: string | null) {

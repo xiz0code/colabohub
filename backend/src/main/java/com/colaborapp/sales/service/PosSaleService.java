@@ -4,14 +4,18 @@ import static java.math.RoundingMode.HALF_UP;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.colaborapp.common.web.dto.PageResponse;
 import com.colaborapp.common.exception.BusinessException;
 import com.colaborapp.common.exception.ResourceNotFoundException;
 import com.colaborapp.config.bootstrap.CurrentTenantProvider;
@@ -57,6 +61,7 @@ import lombok.RequiredArgsConstructor;
 public class PosSaleService {
 
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2, HALF_UP);
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("America/Santiago");
 
     private final SaleRepository saleRepository;
     private final SaleItemRepository saleItemRepository;
@@ -123,13 +128,19 @@ public class PosSaleService {
     }
 
     @Transactional(readOnly = true)
-    public List<PosSaleSummaryResponse> listSales() {
+    public PageResponse<PosSaleSummaryResponse> listSales(LocalDate dateFrom, LocalDate dateTo, Long requestedMarketId, int page, int size) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
-        Long marketId = resolveAuthenticatedPosMarketId();
+        Long marketId = resolveSalesHistoryMarketId(requestedMarketId);
+        Instant startAt = dateFrom != null ? dateFrom.atStartOfDay(BUSINESS_ZONE).toInstant() : Instant.EPOCH;
+        Instant endAt = dateTo != null ? dateTo.plusDays(1).atStartOfDay(BUSINESS_ZONE).toInstant() : Instant.parse("9999-12-31T00:00:00Z");
 
-        return saleRepository.findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(tenantId, marketId).stream()
-                .map(this::buildSummaryResponse)
-                .toList();
+        return PageResponse.from(saleRepository.searchSales(
+                        tenantId,
+                        marketId,
+                        startAt,
+                        endAt,
+                        PageRequest.of(normalizePage(page), normalizeSize(size)))
+                .map(this::buildSummaryResponse));
     }
 
     @Transactional(readOnly = true)
@@ -543,7 +554,18 @@ public class PosSaleService {
     }
 
     private void requirePosWriteAccess() {
-        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
+        accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.SELLER);
+    }
+
+    private Long resolveSalesHistoryMarketId(Long requestedMarketId) {
+        var currentUser = authenticatedUserService.getCurrentUserSnapshot();
+        if (currentUser.roles().contains(RoleCode.ADMIN_SYSTEM.name())) {
+            if (requestedMarketId != null) {
+                accessControlService.requireMarketAccess(requestedMarketId);
+            }
+            return requestedMarketId;
+        }
+        return resolveAuthenticatedPosMarketId();
     }
 
     private Long resolveAuthenticatedPosMarketId() {
@@ -555,6 +577,17 @@ public class PosSaleService {
             throw new BusinessException("The authenticated sales user must be assigned to exactly one tienda to operate the POS.");
         }
         return currentUser.marketIds().getFirst();
+    }
+
+    private int normalizePage(int page) {
+        return Math.max(page, 0);
+    }
+
+    private int normalizeSize(int size) {
+        if (size <= 0) {
+            return 25;
+        }
+        return Math.min(size, 100);
     }
 
     private SaleItem createSaleItem(Sale sale, Product product) {

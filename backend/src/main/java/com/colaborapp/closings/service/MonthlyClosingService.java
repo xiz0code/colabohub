@@ -17,6 +17,7 @@ import com.colaborapp.closings.domain.MonthlyClosing;
 import com.colaborapp.closings.domain.MonthlyClosingCollaborator;
 import com.colaborapp.closings.repository.MonthlyClosingCollaboratorRepository;
 import com.colaborapp.closings.repository.MonthlyClosingRepository;
+import com.colaborapp.closings.web.dto.ClosingPaymentMethodSummaryResponse;
 import com.colaborapp.closings.web.dto.MonthlyClosingCollaboratorResponse;
 import com.colaborapp.closings.web.dto.MonthlyClosingResponse;
 import com.colaborapp.common.exception.ResourceNotFoundException;
@@ -35,6 +36,7 @@ public class MonthlyClosingService {
     private final MarketRepository marketRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final CollaboratorSalesSummaryService collaboratorSalesSummaryService;
+    private final ClosingPaymentMethodSummaryService closingPaymentMethodSummaryService;
     private final CollaboratorClosingEmailService collaboratorClosingEmailService;
     private final ZoneId businessZone;
 
@@ -44,6 +46,7 @@ public class MonthlyClosingService {
             MarketRepository marketRepository,
             CurrentTenantProvider currentTenantProvider,
             CollaboratorSalesSummaryService collaboratorSalesSummaryService,
+            ClosingPaymentMethodSummaryService closingPaymentMethodSummaryService,
             CollaboratorClosingEmailService collaboratorClosingEmailService,
             @Value("${app.business-zone:America/Santiago}") String businessZone) {
         this.monthlyClosingRepository = monthlyClosingRepository;
@@ -51,6 +54,7 @@ public class MonthlyClosingService {
         this.marketRepository = marketRepository;
         this.currentTenantProvider = currentTenantProvider;
         this.collaboratorSalesSummaryService = collaboratorSalesSummaryService;
+        this.closingPaymentMethodSummaryService = closingPaymentMethodSummaryService;
         this.collaboratorClosingEmailService = collaboratorClosingEmailService;
         this.businessZone = ZoneId.of(businessZone);
     }
@@ -127,8 +131,10 @@ public class MonthlyClosingService {
         Instant endAt = month.plusMonths(1).atDay(1).atStartOfDay(businessZone).toInstant();
         List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
                 collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
+        List<ClosingPaymentMethodSummaryResponse> paymentMethodSummaries =
+                closingPaymentMethodSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
 
-        return new ClosingSnapshot(market, collaboratorSummaries);
+        return new ClosingSnapshot(market, collaboratorSummaries, paymentMethodSummaries);
     }
 
     private void applyTotals(MonthlyClosing closing, List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
@@ -178,6 +184,7 @@ public class MonthlyClosingService {
                 closing.getTotalIvaToPayAmount(),
                 closing.getClosedAt(),
                 closing.getClosedBy(),
+                buildPaymentMethodSummaries(closing.getMarket().getId(), YearMonth.from(closing.getClosingMonth())),
                 collaborators.stream()
                         .map(collaborator -> new MonthlyClosingCollaboratorResponse(
                                 collaborator.getCollaboratorUserId(),
@@ -212,6 +219,7 @@ public class MonthlyClosingService {
                 sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::ivaToPayAmount).toList()),
                 closedAt,
                 closedBy,
+                buildPaymentMethodSummaries(market.getId(), YearMonth.from(closingMonth)),
                 collaboratorSummaries.stream()
                         .map(summary -> new MonthlyClosingCollaboratorResponse(
                                 summary.collaboratorUserId(),
@@ -232,8 +240,15 @@ public class MonthlyClosingService {
         return values.stream().reduce(ZERO, BigDecimal::add);
     }
 
+    private List<ClosingPaymentMethodSummaryResponse> buildPaymentMethodSummaries(Long marketId, YearMonth month) {
+        Instant startAt = month.atDay(1).atStartOfDay(businessZone).toInstant();
+        Instant endAt = month.plusMonths(1).atDay(1).atStartOfDay(businessZone).toInstant();
+        return closingPaymentMethodSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
+    }
+
     private record ClosingSnapshot(
             Market market,
-            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
+            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries,
+            List<ClosingPaymentMethodSummaryResponse> paymentMethodSummaries) {
     }
 }

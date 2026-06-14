@@ -34,6 +34,10 @@ vi.mock("@/features/sales/components/PosLauncherProvider", () => ({
   }),
 }));
 
+vi.mock("@/features/markets/api/marketApi", () => ({
+  listMarkets: vi.fn(),
+}));
+
 vi.mock("@/features/sales/api/posApi", () => ({
   addPosSaleItem: vi.fn(),
   cancelPosSale: vi.fn(),
@@ -60,6 +64,7 @@ import {
   searchPosProducts,
   updatePosPaymentMethod,
 } from "@/features/sales/api/posApi";
+import { listMarkets } from "@/features/markets/api/marketApi";
 
 function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
   return {
@@ -134,22 +139,31 @@ function buildSale(status: "OPEN" | "CONFIRMED" | "CANCELLED" = "OPEN") {
 }
 
 function buildSales() {
-  return [
-    {
-      id: 10,
-      saleNumber: "S-2026-00000010",
-      type: "POS",
-      dateTime: "2026-03-15T12:10:00Z",
-      status: "CONFIRMED" as const,
-      subtotalAmount: 28900,
-      netAmount: 24285,
-      ivaAmount: 4615,
-      totalAmount: 28900,
-      paymentMethod: "DEBITO" as const,
-      marketId: 1,
-      sellerName: "Admin Tienda",
-    },
-  ];
+  return {
+    content: [
+      {
+        id: 10,
+        saleNumber: "S-2026-00000010",
+        type: "POS",
+        dateTime: "2026-03-15T12:10:00Z",
+        status: "CONFIRMED" as const,
+        subtotalAmount: 28900,
+        netAmount: 24285,
+        ivaAmount: 4615,
+        totalAmount: 28900,
+        paymentMethod: "DEBITO" as const,
+        marketId: 1,
+        sellerName: "Admin Tienda",
+      },
+    ],
+    page: 0,
+    size: 25,
+    totalElements: 1,
+    totalPages: 1,
+    first: true,
+    last: true,
+    empty: false,
+  };
 }
 
 function renderPage() {
@@ -176,6 +190,22 @@ describe("SalesPage", () => {
     openPosMock.mockReset();
     openPosWithSaleMock.mockReset();
     vi.mocked(listPosSales).mockResolvedValue(buildSales());
+    vi.mocked(listMarkets).mockResolvedValue([
+      {
+        id: 1,
+        name: "Sakura Store",
+        email: "sakura@example.com",
+        phone: null,
+        contactName: null,
+        description: null,
+        city: "Santiago",
+        currency: "CLP",
+        ufEnabled: true,
+        active: true,
+        createdAt: "2026-03-15T12:00:00Z",
+        updatedAt: "2026-03-15T12:00:00Z",
+      },
+    ]);
     vi.mocked(getPosSale).mockResolvedValue(buildSale("CONFIRMED"));
     vi.mocked(editPosSale).mockResolvedValue(buildSale("OPEN"));
     vi.mocked(searchPosProducts).mockResolvedValue([]);

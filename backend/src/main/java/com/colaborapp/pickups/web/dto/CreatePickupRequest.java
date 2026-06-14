@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 
 public record CreatePickupRequest(
         Long storeId,
+        Long collaboratorUserId,
         @NotBlank @Size(max = 80) String pickupNumber,
         @NotBlank @Size(max = 180) String customerName,
         @NotBlank @Size(max = 500) String description,

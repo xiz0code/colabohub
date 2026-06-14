@@ -2,6 +2,7 @@ package com.colaborapp.closings.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -44,6 +45,9 @@ class MonthlyClosingServiceTest {
     private CollaboratorSalesSummaryService collaboratorSalesSummaryService;
 
     @Mock
+    private ClosingPaymentMethodSummaryService closingPaymentMethodSummaryService;
+
+    @Mock
     private CollaboratorClosingEmailService collaboratorClosingEmailService;
 
     private MonthlyClosingService monthlyClosingService;
@@ -58,8 +62,10 @@ class MonthlyClosingServiceTest {
                 marketRepository,
                 currentTenantProvider,
                 collaboratorSalesSummaryService,
+                closingPaymentMethodSummaryService,
                 collaboratorClosingEmailService,
                 "America/Santiago");
+        lenient().when(closingPaymentMethodSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
 
         tenant = new Tenant();
         tenant.setId(1L);

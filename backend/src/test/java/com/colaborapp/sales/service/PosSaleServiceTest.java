@@ -22,6 +22,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 
 import com.colaborapp.common.exception.BusinessException;
@@ -179,22 +181,40 @@ class PosSaleServiceTest {
         sale.setTotalAmount(new BigDecimal("11900.00"));
 
         when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
-        when(saleRepository.findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(1L, marketA.getId()))
-                .thenReturn(List.of(sale));
+        when(saleRepository.searchSales(1L, marketA.getId(), Instant.EPOCH, Instant.parse("9999-12-31T00:00:00Z"), PageRequest.of(0, 25)))
+                .thenReturn(new PageImpl<>(List.of(sale), PageRequest.of(0, 25), 1));
 
-        List<PosSaleSummaryResponse> response = posSaleService.listSales();
+        var response = posSaleService.listSales(null, null, null, 0, 25);
 
-        assertThat(response).hasSize(1);
-        assertThat(response.getFirst().marketId()).isEqualTo(marketA.getId());
-        assertThat(response.getFirst().ivaAmount()).isPositive();
-        assertThat(response.getFirst().paymentMethod()).isEqualTo(PaymentMethod.CASH);
+        assertThat(response.content()).hasSize(1);
+        assertThat(response.content().getFirst().marketId()).isEqualTo(marketA.getId());
+        assertThat(response.content().getFirst().ivaAmount()).isPositive();
+        assertThat(response.content().getFirst().paymentMethod()).isEqualTo(PaymentMethod.CASH);
+    }
+
+    @Test
+    void shouldLetSystemAdminFilterSalesByMarket() {
+        Sale sale = openSale(89L);
+        sale.setMarket(marketB);
+        sale.setTotalAmount(new BigDecimal("23800.00"));
+
+        when(authenticatedUserService.getCurrentUserSnapshot()).thenReturn(currentSystemAdminUser());
+        when(currentTenantProvider.getCurrentTenant()).thenReturn(tenant);
+        when(saleRepository.searchSales(1L, marketB.getId(), Instant.EPOCH, Instant.parse("9999-12-31T00:00:00Z"), PageRequest.of(0, 25)))
+                .thenReturn(new PageImpl<>(List.of(sale), PageRequest.of(0, 25), 1));
+
+        var response = posSaleService.listSales(null, null, marketB.getId(), 0, 25);
+
+        verify(accessControlService).requireMarketAccess(marketB.getId());
+        assertThat(response.content()).hasSize(1);
+        assertThat(response.content().getFirst().marketId()).isEqualTo(marketB.getId());
     }
 
     @Test
     void storeUserCannotCreateSale() {
         org.mockito.Mockito.doThrow(new AccessDeniedException("You do not have permission to perform this action."))
                 .when(accessControlService)
-                .requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.SELLER);
+                .requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.SELLER);
 
         assertThatThrownBy(() -> posSaleService.createSale(new CreatePosSaleRequest(PaymentMethod.CASH, null)))
                 .isInstanceOf(AccessDeniedException.class)
@@ -959,6 +979,23 @@ class PosSaleServiceTest {
                 List.of(marketA.getId()),
                 List.of(),
                 List.of(marketA.getName()));
+    }
+
+    private AuthenticatedUserService.CurrentAuthenticatedUser currentSystemAdminUser() {
+        User user = new User();
+        user.setId(502L);
+        user.setEmail("admin@colaborapp.cl");
+        user.setFullName("Admin General");
+        user.setActive(true);
+        return new AuthenticatedUserService.CurrentAuthenticatedUser(
+                user,
+                List.of(RoleCode.ADMIN_SYSTEM.name()),
+                true,
+                null,
+                null,
+                List.of(),
+                List.of(),
+                List.of());
     }
 
     private CommissionSettingsService.EffectiveCommissionConfig defaultCommissionConfig() {

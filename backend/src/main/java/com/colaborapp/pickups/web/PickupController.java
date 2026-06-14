@@ -39,14 +39,16 @@ public class PickupController {
     public List<PickupResponse> list(
             @RequestParam(required = false) String query,
             @RequestParam(required = false) PickupStatus status,
-            @RequestParam(required = false) Long storeId) {
-        return pickupService.list(query, status, storeId);
+            @RequestParam(required = false) Long storeId,
+            @RequestParam(required = false) Long collaboratorUserId) {
+        return pickupService.list(query, status, storeId, collaboratorUserId);
     }
 
     @PostMapping
     public PickupResponse create(@Valid @RequestBody CreatePickupRequest request) {
         return pickupService.create(
                 request.storeId(),
+                request.collaboratorUserId(),
                 request.pickupNumber(),
                 request.customerName(),
                 request.description(),

@@ -7,7 +7,7 @@ export type Store = {
   marketName: string;
   code: string;
   name: string;
-  type: "PRIMARY" | "COLLABORATOR";
+  type: "STOCK" | "PRIMARY" | "COLLABORATOR";
   status: "ACTIVE" | "INACTIVE";
   createdAt: string;
   updatedAt: string;

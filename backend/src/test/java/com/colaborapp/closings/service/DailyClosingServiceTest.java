@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -71,6 +72,9 @@ class DailyClosingServiceTest {
     private CollaboratorSalesSummaryService collaboratorSalesSummaryService;
 
     @Mock
+    private ClosingPaymentMethodSummaryService closingPaymentMethodSummaryService;
+
+    @Mock
     private CollaboratorClosingEmailService collaboratorClosingEmailService;
 
     private DailyClosingService dailyClosingService;
@@ -101,8 +105,10 @@ class DailyClosingServiceTest {
                 currentTenantProvider,
                 dailyClosingEmailService,
                 collaboratorSalesSummaryService,
+                closingPaymentMethodSummaryService,
                 collaboratorClosingEmailService,
                 "America/Santiago");
+        lenient().when(closingPaymentMethodSummaryService.summarizeByMarketAndPeriod(any(), any(), any())).thenReturn(List.of());
     }
 
     @Test

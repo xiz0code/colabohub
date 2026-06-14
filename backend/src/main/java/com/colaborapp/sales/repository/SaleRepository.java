@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -42,7 +44,29 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             @Param("startAt") Instant startAt,
             @Param("endAt") Instant endAt);
 
-    List<Sale> findTop100ByTenantIdAndMarketIdOrderByOpenedAtDescIdDesc(Long tenantId, Long marketId);
+    @Query(value = """
+            select s from Sale s
+            left join fetch s.market market
+            where s.tenant.id = :tenantId
+              and (:marketId is null or market.id = :marketId)
+              and coalesce(s.confirmedAt, s.openedAt) >= :startAt
+              and coalesce(s.confirmedAt, s.openedAt) < :endAt
+            order by coalesce(s.confirmedAt, s.openedAt) desc, s.id desc
+            """,
+            countQuery = """
+            select count(s) from Sale s
+            left join s.market market
+            where s.tenant.id = :tenantId
+              and (:marketId is null or market.id = :marketId)
+              and coalesce(s.confirmedAt, s.openedAt) >= :startAt
+              and coalesce(s.confirmedAt, s.openedAt) < :endAt
+            """)
+    Page<Sale> searchSales(
+            @Param("tenantId") Long tenantId,
+            @Param("marketId") Long marketId,
+            @Param("startAt") Instant startAt,
+            @Param("endAt") Instant endAt,
+            Pageable pageable);
 
     Optional<Sale> findFirstBySaleNumberStartingWithOrderBySaleNumberDesc(String prefix);
 
@@ -155,6 +179,25 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             order by sss.store.name asc
             """)
     List<Object[]> summarizeMarketPayoutsByPeriod(
+            @Param("tenantId") Long tenantId,
+            @Param("marketId") Long marketId,
+            @Param("status") SaleStatus status,
+            @Param("startAt") Instant startAt,
+            @Param("endAt") Instant endAt);
+
+    @Query("""
+            select s.paymentMethod, count(distinct s.id), sum(sss.subtotalAmount)
+            from SaleStoreSummary sss
+            join sss.sale s
+            where s.tenant.id = :tenantId
+              and s.market.id = :marketId
+              and s.status = :status
+              and s.confirmedAt >= :startAt
+              and s.confirmedAt < :endAt
+            group by s.paymentMethod
+            order by s.paymentMethod asc
+            """)
+    List<Object[]> summarizeMarketPaymentMethodsByPeriod(
             @Param("tenantId") Long tenantId,
             @Param("marketId") Long marketId,
             @Param("status") SaleStatus status,

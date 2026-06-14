@@ -18,6 +18,7 @@ import com.colaborapp.closings.domain.DailyClosingStore;
 import com.colaborapp.closings.repository.DailyClosingCollaboratorRepository;
 import com.colaborapp.closings.repository.DailyClosingRepository;
 import com.colaborapp.closings.repository.DailyClosingStoreRepository;
+import com.colaborapp.closings.web.dto.ClosingPaymentMethodSummaryResponse;
 import com.colaborapp.closings.web.dto.DailyClosingResponse;
 import com.colaborapp.closings.web.dto.DailyClosingStoreResponse;
 import com.colaborapp.common.exception.ResourceNotFoundException;
@@ -43,6 +44,7 @@ public class DailyClosingService {
     private final CurrentTenantProvider currentTenantProvider;
     private final DailyClosingEmailService dailyClosingEmailService;
     private final CollaboratorSalesSummaryService collaboratorSalesSummaryService;
+    private final ClosingPaymentMethodSummaryService closingPaymentMethodSummaryService;
     private final CollaboratorClosingEmailService collaboratorClosingEmailService;
     private final ZoneId businessZone;
 
@@ -56,6 +58,7 @@ public class DailyClosingService {
             CurrentTenantProvider currentTenantProvider,
             DailyClosingEmailService dailyClosingEmailService,
             CollaboratorSalesSummaryService collaboratorSalesSummaryService,
+            ClosingPaymentMethodSummaryService closingPaymentMethodSummaryService,
             CollaboratorClosingEmailService collaboratorClosingEmailService,
             @Value("${app.business-zone:America/Santiago}") String businessZone) {
         this.dailyClosingRepository = dailyClosingRepository;
@@ -67,6 +70,7 @@ public class DailyClosingService {
         this.currentTenantProvider = currentTenantProvider;
         this.dailyClosingEmailService = dailyClosingEmailService;
         this.collaboratorSalesSummaryService = collaboratorSalesSummaryService;
+        this.closingPaymentMethodSummaryService = closingPaymentMethodSummaryService;
         this.collaboratorClosingEmailService = collaboratorClosingEmailService;
         this.businessZone = ZoneId.of(businessZone);
     }
@@ -144,8 +148,10 @@ public class DailyClosingService {
 
         List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries =
                 collaboratorSalesSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
+        List<ClosingPaymentMethodSummaryResponse> paymentMethodSummaries =
+                closingPaymentMethodSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
 
-        return new ClosingSnapshot(market, collaboratorSummaries);
+        return new ClosingSnapshot(market, collaboratorSummaries, paymentMethodSummaries);
     }
 
     private void applyTotals(DailyClosing closing, List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
@@ -191,6 +197,7 @@ public class DailyClosingService {
                 closing.getTotalNetAmount(),
                 closing.getClosedAt(),
                 closing.getClosedBy(),
+                buildPaymentMethodSummaries(closing.getMarket().getId(), closing.getClosingDate()),
                 collaborators.stream()
                         .map(collaborator -> new DailyClosingStoreResponse(
                                 collaborator.getCollaboratorUserId(),
@@ -219,6 +226,7 @@ public class DailyClosingService {
                 sum(collaboratorSummaries.stream().map(CollaboratorSalesSummaryService.CollaboratorSummary::totalNetAmount).toList()),
                 closedAt,
                 closedBy,
+                buildPaymentMethodSummaries(market.getId(), closingDate),
                 collaboratorSummaries.stream()
                         .map(summary -> new DailyClosingStoreResponse(
                                 summary.collaboratorUserId(),
@@ -248,6 +256,7 @@ public class DailyClosingService {
                     closing.getTotalNetAmount(),
                     closing.getClosedAt(),
                     closing.getClosedBy(),
+                    buildPaymentMethodSummaries(closing.getMarket().getId(), closing.getClosingDate()),
                     legacyStores.stream()
                             .map(store -> new DailyClosingStoreResponse(
                                     store.getStore() == null ? null : store.getStore().getId(),
@@ -277,8 +286,15 @@ public class DailyClosingService {
         return values.stream().reduce(ZERO, BigDecimal::add);
     }
 
+    private List<ClosingPaymentMethodSummaryResponse> buildPaymentMethodSummaries(Long marketId, LocalDate closingDate) {
+        Instant startAt = closingDate.atStartOfDay(businessZone).toInstant();
+        Instant endAt = closingDate.plusDays(1).atStartOfDay(businessZone).toInstant();
+        return closingPaymentMethodSummaryService.summarizeByMarketAndPeriod(marketId, startAt, endAt);
+    }
+
     private record ClosingSnapshot(
             Market market,
-            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries) {
+            List<CollaboratorSalesSummaryService.CollaboratorSummary> collaboratorSummaries,
+            List<ClosingPaymentMethodSummaryResponse> paymentMethodSummaries) {
     }
 }

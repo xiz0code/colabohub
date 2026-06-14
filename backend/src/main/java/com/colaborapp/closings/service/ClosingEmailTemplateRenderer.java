@@ -56,6 +56,32 @@ public class ClosingEmailTemplateRenderer {
     }
 
     public String renderDailyAdminHtml(com.colaborapp.closings.web.dto.DailyClosingResponse response) {
+        String paymentRows = response.paymentMethods().isEmpty()
+                ? "<tr><td colspan='3' style='padding:14px 16px;color:#756f86;'>No hubo ventas por medios de pago en este cierre.</td></tr>"
+                : response.paymentMethods().stream()
+                        .map(paymentMethod -> "<tr>"
+                                + cell(translatePaymentMethod(paymentMethod.paymentMethod()), true)
+                                + cell(String.valueOf(paymentMethod.saleCount()), false)
+                                + cell(formatMoney(paymentMethod.totalSalesAmount()), false)
+                                + "</tr>")
+                        .reduce("", String::concat);
+
+        String paymentTable = """
+                <div style="margin-top:24px;border:1px solid #eee7fb;border-radius:20px;overflow:hidden;background:#fff;">
+                  <div style="padding:18px 20px 8px;font-size:16px;font-weight:700;color:#302b44;">Cuadratura por medio de pago</div>
+                  <table style="width:100%%;border-collapse:collapse;font-size:14px;">
+                    <thead>
+                      <tr style="background:linear-gradient(135deg,#f7eefc,#eef4ff);color:#6f6887;text-align:left;">
+                        <th style="padding:12px 16px;">Medio de pago</th>
+                        <th style="padding:12px 16px;">Ventas</th>
+                        <th style="padding:12px 16px;">Monto vendido</th>
+                      </tr>
+                    </thead>
+                    <tbody>%s</tbody>
+                  </table>
+                </div>
+                """.formatted(paymentRows);
+
         String rows = response.stores().isEmpty()
                 ? "<tr><td colspan='5' style='padding:14px 16px;color:#756f86;'>No hubo Tiendas con ventas en este cierre.</td></tr>"
                 : response.stores().stream()
@@ -96,7 +122,7 @@ public class ClosingEmailTemplateRenderer {
                 response.marketName(),
                 "Resumen consolidado del cierre diario generado por ColaboHub.",
                 chips,
-                table);
+                paymentTable + table);
     }
 
     private String layout(String hero, String subtitle, String greetingName, String intro, String metrics, String mainContent) {
@@ -225,6 +251,8 @@ public class ClosingEmailTemplateRenderer {
             case "DEBIT_CARD" -> "Débito";
             case "CREDIT_CARD" -> "Crédito";
             case "CASH" -> "Efectivo";
+            case "DEBITO" -> "Débito";
+            case "CREDIT" -> "Crédito";
             case "TRANSFER" -> "Transferencia";
             default -> paymentMethod;
         };

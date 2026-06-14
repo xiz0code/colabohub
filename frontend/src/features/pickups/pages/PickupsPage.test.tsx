@@ -57,8 +57,8 @@ describe("PickupsPage", () => {
 
     vi.mocked(listUsers).mockResolvedValue([
       {
-        id: 7,
-        email: "tienda.felipe@example.com",
+        id: 60,
+        email: "felipe@example.com",
         fullName: "Tienda Felipe",
         phone: null,
         contactName: null,
@@ -75,8 +75,8 @@ describe("PickupsPage", () => {
         updatedAt: "2026-03-22T12:00:00Z",
       },
       {
-        id: 8,
-        email: "tienda.igor@example.com",
+        id: 61,
+        email: "igor@example.com",
         fullName: "Tienda Igor",
         phone: null,
         contactName: null,
@@ -247,7 +247,8 @@ describe("PickupsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Nuevo retiro" }));
 
-    await user.selectOptions(screen.getByLabelText("Tienda"), "5");
+    expect(screen.queryByRole("option", { name: "Stock principal" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Tienda"), "60");
     await user.type(screen.getByLabelText("Numero de retiro"), "WEB-200");
     await user.type(screen.getByLabelText("Nombre de quien retira"), "Javiera");
     await user.type(screen.getByLabelText("Descripcion"), "Pedido Instagram");
@@ -257,7 +258,7 @@ describe("PickupsPage", () => {
 
     await waitFor(() => {
       expect(createPickup).toHaveBeenCalledWith({
-        storeId: 5,
+        collaboratorUserId: 60,
         pickupNumber: "WEB-200",
         customerName: "Javiera",
         description: "Pedido Instagram",

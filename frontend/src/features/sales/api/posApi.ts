@@ -1,4 +1,5 @@
 import { apiFetch } from "@/shared/lib/api/client";
+import type { PageResponse } from "@/shared/lib/api/types";
 
 export type PosSaleItem = {
   id: number;
@@ -107,8 +108,29 @@ export function createPosSale(paymentMethod?: PosSale["paymentMethod"]) {
   });
 }
 
-export function listPosSales() {
-  return apiFetch<PosSaleSummary[]>("/api/pos/sales");
+export type ListPosSalesParams = {
+  page?: number;
+  size?: number;
+  marketId?: number | null;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export function listPosSales(params: ListPosSalesParams = {}) {
+  const search = new URLSearchParams();
+  search.set("page", String(params.page ?? 0));
+  search.set("size", String(params.size ?? 25));
+  if (params.dateFrom) {
+    search.set("dateFrom", params.dateFrom);
+  }
+  if (params.dateTo) {
+    search.set("dateTo", params.dateTo);
+  }
+  if (params.marketId) {
+    search.set("marketId", String(params.marketId));
+  }
+
+  return apiFetch<PageResponse<PosSaleSummary>>(`/api/pos/sales?${search.toString()}`);
 }
 
 export function getOpenPosSale() {

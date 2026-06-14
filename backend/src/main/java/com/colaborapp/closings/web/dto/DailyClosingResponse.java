@@ -15,5 +15,6 @@ public record DailyClosingResponse(
         BigDecimal totalNetAmount,
         Instant closedAt,
         String closedBy,
+        List<ClosingPaymentMethodSummaryResponse> paymentMethods,
         List<DailyClosingStoreResponse> stores) {
 }

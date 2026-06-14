@@ -27,7 +27,7 @@ export type PreparePickupCheckoutResponse = {
   sale: PosSale;
 };
 
-export function listPickups(params?: { query?: string; status?: PickupStatus | "ALL"; storeId?: number | null }) {
+export function listPickups(params?: { query?: string; status?: PickupStatus | "ALL"; storeId?: number | null; collaboratorUserId?: number | null }) {
   const searchParams = new URLSearchParams();
   if (params?.query?.trim()) {
     searchParams.set("query", params.query.trim());
@@ -38,12 +38,16 @@ export function listPickups(params?: { query?: string; status?: PickupStatus | "
   if (params?.storeId) {
     searchParams.set("storeId", String(params.storeId));
   }
+  if (params?.collaboratorUserId) {
+    searchParams.set("collaboratorUserId", String(params.collaboratorUserId));
+  }
   const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
   return apiFetch<Pickup[]>(`/api/pickups${suffix}`);
 }
 
 export function createPickup(input: {
   storeId?: number;
+  collaboratorUserId?: number;
   pickupNumber: string;
   customerName: string;
   description: string;

@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
+import { listMarkets } from "@/features/markets/api/marketApi";
 import { usePosLauncher } from "@/features/sales/components/PosLauncherProvider";
 import {
   cancelPosSale,
@@ -22,6 +23,10 @@ type Feedback = {
   message: string;
 };
 
+type DateFilterMode = "today" | "month" | "range";
+
+const PAGE_SIZE = 25;
+
 export function SalesPage() {
   const queryClient = useQueryClient();
   const { user, primaryRole } = useSession();
@@ -30,14 +35,29 @@ export function SalesPage() {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>("month");
+  const [customDateFrom, setCustomDateFrom] = useState(toInputDate(startOfCurrentMonth()));
+  const [customDateTo, setCustomDateTo] = useState(toInputDate(new Date()));
+  const [page, setPage] = useState(0);
+  const [selectedMarketId, setSelectedMarketId] = useState("");
 
-  const activeMarketName = user?.activeMarketName ?? "tu Espacio";
-  const canOperatePos = (primaryRole === "ADMIN_MARKET" || primaryRole === "SELLER") && Boolean(user?.activeMarketId);
+  const activeMarketName = primaryRole === "ADMIN_SYSTEM" ? "todos los Espacios" : user?.activeMarketName ?? "tu Espacio";
+  const canCreateSale = (primaryRole === "ADMIN_MARKET" || primaryRole === "SELLER") && Boolean(user?.activeMarketId);
+  const canViewSales = primaryRole === "ADMIN_SYSTEM" || canCreateSale;
+  const canEditSales = primaryRole === "ADMIN_SYSTEM" || primaryRole === "ADMIN_MARKET" || primaryRole === "SELLER";
+  const dateRange = resolveDateRange(dateFilterMode, customDateFrom, customDateTo);
+  const marketIdFilter = primaryRole === "ADMIN_SYSTEM" && selectedMarketId ? Number(selectedMarketId) : null;
+
+  const marketsQuery = useQuery({
+    queryKey: ["markets", "sales-filter"],
+    queryFn: listMarkets,
+    enabled: primaryRole === "ADMIN_SYSTEM",
+  });
 
   const salesQuery = useQuery({
-    queryKey: ["pos", "sales"],
-    queryFn: listPosSales,
-    enabled: canOperatePos,
+    queryKey: ["pos", "sales", dateRange.dateFrom, dateRange.dateTo, marketIdFilter, page, PAGE_SIZE],
+    queryFn: () => listPosSales({ dateFrom: dateRange.dateFrom, dateTo: dateRange.dateTo, marketId: marketIdFilter, page, size: PAGE_SIZE }),
+    enabled: canViewSales,
   });
 
   const detailSaleQuery = useQuery({
@@ -84,17 +104,17 @@ export function SalesPage() {
 
   const saleForDetail = detailSaleQuery.data ?? null;
 
-  if (!canOperatePos) {
+  if (!canViewSales) {
     return (
       <section>
         <PageHeader
           title="Ventas"
-          description="El POS esta disponible solo para Administradores de Espacio y vendedores con un Espacio activo."
+          description="El historial de ventas esta disponible para Administradores de Sitio, Administradores de Espacio y vendedores con un Espacio activo."
         />
         <div className="soft-surface p-8">
           <EmptyState
-            title="No tienes acceso operativo al POS"
-            description="Solicita acceso como Administrador de Espacio o vendedor si necesitas registrar ventas."
+            title="No tienes acceso al historial de ventas"
+            description="Solicita acceso operativo si necesitas revisar o editar ventas."
           />
         </div>
       </section>
@@ -107,7 +127,7 @@ export function SalesPage() {
         title="Ventas"
         description="Administra tu caja, revisa el historial y anula ventas confirmadas con trazabilidad completa."
         eyebrow="POS SaaS"
-        actions={
+        actions={canCreateSale ? (
           <button
             type="button"
             onClick={openPos}
@@ -116,7 +136,7 @@ export function SalesPage() {
           >
             {isOpening ? "Preparando venta..." : "Nueva venta"}
           </button>
-        }
+        ) : undefined}
       />
 
       {feedback ? (
@@ -130,12 +150,75 @@ export function SalesPage() {
           <div>
             <h2 className="text-xl font-semibold text-foreground">Ventas de {activeMarketName}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Cada nueva venta abre o reutiliza automaticamente la venta en curso de tu Espacio.
+              Revisa ventas por fecha, pagina el historial completo y abre ventas confirmadas para corregirlas cuando corresponda.
             </p>
           </div>
           <div className="soft-subtle-surface rounded-[22px] px-4 py-3 text-sm">
-            <span className="text-muted-foreground">Ventas visibles: </span>
-            <span className="font-semibold text-foreground">{salesQuery.data?.length ?? 0}</span>
+            <span className="text-muted-foreground">Ventas encontradas: </span>
+            <span className="font-semibold text-foreground">{salesQuery.data?.totalElements ?? 0}</span>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-4 rounded-[24px] border border-border/60 bg-white/65 p-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="flex flex-wrap gap-2">
+            <FilterButton active={dateFilterMode === "today"} onClick={() => changeDateFilter("today", setDateFilterMode, setPage)}>
+              Hoy
+            </FilterButton>
+            <FilterButton active={dateFilterMode === "month"} onClick={() => changeDateFilter("month", setDateFilterMode, setPage)}>
+              Mes actual
+            </FilterButton>
+            <FilterButton active={dateFilterMode === "range"} onClick={() => changeDateFilter("range", setDateFilterMode, setPage)}>
+              Rango
+            </FilterButton>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(150px,0.7fr)_minmax(150px,0.7fr)]">
+            {primaryRole === "ADMIN_SYSTEM" ? (
+              <label className="grid gap-1 text-sm sm:col-span-2 xl:col-span-1">
+                <span className="text-muted-foreground">Espacio</span>
+                <select
+                  value={selectedMarketId}
+                  onChange={(event) => {
+                    setSelectedMarketId(event.target.value);
+                    setPage(0);
+                  }}
+                  className="rounded-2xl border border-input bg-background px-3 py-2.5"
+                >
+                  <option value="">Todos los Espacios</option>
+                  {(marketsQuery.data ?? []).map((market) => (
+                    <option key={market.id} value={market.id}>
+                      {market.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="grid gap-1 text-sm">
+              <span className="text-muted-foreground">Desde</span>
+              <input
+                type="date"
+                value={dateFilterMode === "range" ? customDateFrom : dateRange.dateFrom}
+                disabled={dateFilterMode !== "range"}
+                onChange={(event) => {
+                  setCustomDateFrom(event.target.value);
+                  setPage(0);
+                }}
+                className="rounded-2xl border border-input bg-background px-3 py-2.5 disabled:bg-muted/50"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-muted-foreground">Hasta</span>
+              <input
+                type="date"
+                value={dateFilterMode === "range" ? customDateTo : dateRange.dateTo}
+                disabled={dateFilterMode !== "range"}
+                onChange={(event) => {
+                  setCustomDateTo(event.target.value);
+                  setPage(0);
+                }}
+                className="rounded-2xl border border-input bg-background px-3 py-2.5 disabled:bg-muted/50"
+              />
+            </label>
           </div>
         </div>
 
@@ -150,7 +233,7 @@ export function SalesPage() {
           </div>
         ) : null}
 
-        {salesQuery.data && salesQuery.data.length > 0 ? (
+        {salesQuery.data && salesQuery.data.content.length > 0 ? (
           <div className="soft-table mt-6">
             <table>
               <thead>
@@ -165,7 +248,7 @@ export function SalesPage() {
                 </tr>
               </thead>
               <tbody>
-                {salesQuery.data.map((sale) => (
+                {salesQuery.data.content.map((sale) => (
                   <tr key={sale.id}>
                     <td>
                       <p className="font-medium">{formatDateTime(sale.dateTime)}</p>
@@ -190,7 +273,7 @@ export function SalesPage() {
                         >
                           Ver detalle
                         </button>
-                        {sale.status === "CONFIRMED" ? (
+                        {sale.status === "CONFIRMED" && canEditSales ? (
                           <button
                             type="button"
                             onClick={() => editMutation.mutate(sale.id)}
@@ -199,7 +282,7 @@ export function SalesPage() {
                             Editar
                           </button>
                         ) : null}
-                        {sale.status === "CONFIRMED" ? (
+                        {sale.status === "CONFIRMED" && canEditSales ? (
                           <button
                             type="button"
                             onClick={() =>
@@ -218,6 +301,29 @@ export function SalesPage() {
                 ))}
               </tbody>
             </table>
+            <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-muted-foreground">
+                Pagina {salesQuery.data.page + 1} de {Math.max(salesQuery.data.totalPages, 1)}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.max(current - 1, 0))}
+                  disabled={salesQuery.data.first || salesQuery.isFetching}
+                  className="rounded-full border border-border px-4 py-2 font-semibold disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => current + 1)}
+                  disabled={salesQuery.data.last || salesQuery.isFetching}
+                  className="rounded-full border border-border px-4 py-2 font-semibold disabled:opacity-50"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           !salesQuery.isLoading && (
@@ -362,6 +468,20 @@ export function SalesPage() {
   );
 }
 
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+        active ? "border-violet-200 bg-violet-50 text-violet-700" : "border-border bg-white/75 text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function DetailCard({ label, value }: { label: string; value: ReactNode }) {
   return (
     <article className="soft-subtle-surface rounded-[24px] p-4">
@@ -422,6 +542,40 @@ function formatPaymentMethodLabel(paymentMethod: PosSale["paymentMethod"] | null
   } as const;
 
   return labelMap[paymentMethod];
+}
+
+function changeDateFilter(mode: DateFilterMode, setDateFilterMode: (mode: DateFilterMode) => void, setPage: (page: number) => void) {
+  setDateFilterMode(mode);
+  setPage(0);
+}
+
+function resolveDateRange(mode: DateFilterMode, customDateFrom: string, customDateTo: string) {
+  const today = new Date();
+  if (mode === "today") {
+    const date = toInputDate(today);
+    return { dateFrom: date, dateTo: date };
+  }
+
+  if (mode === "month") {
+    return { dateFrom: toInputDate(startOfCurrentMonth()), dateTo: toInputDate(today) };
+  }
+
+  return {
+    dateFrom: customDateFrom,
+    dateTo: customDateTo || customDateFrom,
+  };
+}
+
+function startOfCurrentMonth() {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth(), 1);
+}
+
+function toInputDate(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

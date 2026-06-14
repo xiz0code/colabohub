@@ -22,9 +22,13 @@ import com.colaborapp.sales.repository.SaleItemRepository;
 import com.colaborapp.sales.repository.SaleRepository;
 import com.colaborapp.sales.service.PosSaleService;
 import com.colaborapp.sales.web.dto.PosSaleResponse;
+import com.colaborapp.stores.domain.StoreStatus;
 import com.colaborapp.stores.domain.Store;
+import com.colaborapp.stores.domain.StoreType;
 import com.colaborapp.stores.repository.StoreRepository;
 import com.colaborapp.users.domain.RoleCode;
+import com.colaborapp.users.domain.User;
+import com.colaborapp.users.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -38,6 +42,7 @@ public class PickupService {
     private final PickupRepository pickupRepository;
     private final StoreRepository storeRepository;
     private final ProductRepository productRepository;
+    private final UserRepository userRepository;
     private final SaleRepository saleRepository;
     private final SaleItemRepository saleItemRepository;
     private final CurrentTenantProvider currentTenantProvider;
@@ -46,7 +51,7 @@ public class PickupService {
     private final com.colaborapp.security.AuthenticatedUserService authenticatedUserService;
 
     @Transactional(readOnly = true)
-    public List<PickupResponse> list(String query, PickupStatus status, Long storeId) {
+    public List<PickupResponse> list(String query, PickupStatus status, Long storeId, Long selectedCollaboratorUserId) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         var currentUser = authenticatedUserService.getCurrentUserSnapshot();
 
@@ -70,6 +75,12 @@ public class PickupService {
             scopedStoreIds = List.of(storeId);
             storeIdsEmpty = false;
         }
+        if (selectedCollaboratorUserId != null) {
+            if (collaboratorUserId != null && !collaboratorUserId.equals(selectedCollaboratorUserId)) {
+                throw new BusinessException("No tienes acceso a los retiros de esta Tienda.");
+            }
+            collaboratorUserId = selectedCollaboratorUserId;
+        }
 
         String normalizedQuery = normalizeQuery(query);
         return pickupRepository.search(tenantId, marketId, scopedStoreIds, storeIdsEmpty, collaboratorUserId, status, normalizedQuery).stream()
@@ -78,7 +89,7 @@ public class PickupService {
     }
 
     @Transactional
-    public PickupResponse create(Long storeId, String pickupNumber, String customerName, String description, boolean payable, BigDecimal amountDue) {
+    public PickupResponse create(Long storeId, Long collaboratorUserId, String pickupNumber, String customerName, String description, boolean payable, BigDecimal amountDue) {
         requireCreateAccess();
         if (payable && (amountDue == null || amountDue.compareTo(BigDecimal.ZERO) <= 0)) {
             throw new BusinessException("Ingresa un monto valido cuando el retiro es por pagar.");
@@ -86,13 +97,17 @@ public class PickupService {
 
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         var currentUser = authenticatedUserService.getCurrentUserSnapshot();
-        Store store = resolveStoreForCreate(storeId, tenantId);
+        User collaborator = resolveCollaboratorForCreate(collaboratorUserId, tenantId);
+        Store store = resolveStoreForCreate(storeId, collaborator, tenantId);
 
         Pickup pickup = new Pickup();
         pickup.setTenant(currentTenantProvider.getCurrentTenant());
         pickup.setMarket(store.getMarket());
         pickup.setStore(store);
-        if (currentUser.roles().contains(RoleCode.STORE_USER.name())) {
+        if (collaborator != null) {
+            pickup.setCollaboratorUserId(collaborator.getId());
+            pickup.setCollaboratorNameSnapshot(collaborator.getFullName());
+        } else if (currentUser.roles().contains(RoleCode.STORE_USER.name())) {
             pickup.setCollaboratorUserId(currentUser.user().getId());
             pickup.setCollaboratorNameSnapshot(currentUser.user().getFullName());
         }
@@ -106,7 +121,35 @@ public class PickupService {
         return toResponse(pickup);
     }
 
-    private Store resolveStoreForCreate(Long storeId, Long tenantId) {
+    private User resolveCollaboratorForCreate(Long collaboratorUserId, Long tenantId) {
+        var currentUser = authenticatedUserService.getCurrentUserSnapshot();
+
+        if (currentUser.roles().contains(RoleCode.STORE_USER.name())) {
+            return userRepository.findWithAccessById(currentUser.user().getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("No encontramos la Tienda activa para crear el retiro."));
+        }
+
+        if (collaboratorUserId == null) {
+            return null;
+        }
+
+        User collaborator = userRepository.findWithAccessById(collaboratorUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("No encontramos la Tienda seleccionada para el retiro."));
+        boolean isStoreUser = collaborator.getRoles().stream().anyMatch(role -> role.getCode() == RoleCode.STORE_USER);
+        if (!collaborator.isActive() || !isStoreUser) {
+            throw new BusinessException("Selecciona una Tienda activa asociada al Espacio.");
+        }
+        if (accessControlService.hasRole(RoleCode.ADMIN_MARKET)) {
+            boolean canManageMarket = collaborator.getMarkets().stream().anyMatch(market -> accessControlService.currentMarketIds().contains(market.getId()))
+                    || collaborator.getStores().stream().anyMatch(store -> accessControlService.currentMarketIds().contains(store.getMarket().getId()));
+            if (!canManageMarket) {
+                throw new BusinessException("No tienes acceso a la Tienda seleccionada.");
+            }
+        }
+        return collaborator;
+    }
+
+    private Store resolveStoreForCreate(Long storeId, User collaborator, Long tenantId) {
         var currentUser = authenticatedUserService.getCurrentUserSnapshot();
 
         if (currentUser.roles().contains(RoleCode.STORE_USER.name())) {
@@ -129,6 +172,12 @@ public class PickupService {
             return store;
         }
 
+        if (collaborator != null) {
+            Store store = resolveStockStoreForCollaborator(collaborator, tenantId);
+            accessControlService.requireStoreAccess(store.getId());
+            return store;
+        }
+
         if (storeId == null) {
             throw new BusinessException("Selecciona la Tienda responsable del retiro.");
         }
@@ -137,6 +186,38 @@ public class PickupService {
                 .orElseThrow(() -> new ResourceNotFoundException("No encontramos la Tienda seleccionada para el retiro."));
         accessControlService.requireStoreAccess(store.getId());
         return store;
+    }
+
+    private Store resolveStockStoreForCollaborator(User collaborator, Long tenantId) {
+        Long marketId = collaborator.getMarkets().stream()
+                .map(market -> market.getId())
+                .findFirst()
+                .orElseGet(() -> collaborator.getStores().stream()
+                        .map(store -> store.getMarket().getId())
+                        .findFirst()
+                        .orElse(null));
+        if (marketId == null) {
+            throw new BusinessException("La Tienda seleccionada no tiene un Espacio asociado.");
+        }
+
+        return storeRepository.findFirstByTenantIdAndMarketIdAndType(tenantId, marketId, StoreType.STOCK)
+                .orElseGet(() -> {
+                    Store stockStore = new Store();
+                    stockStore.setTenant(currentTenantProvider.getCurrentTenant());
+                    stockStore.setMarket(collaborator.getMarkets().stream()
+                            .filter(market -> market.getId().equals(marketId))
+                            .findFirst()
+                            .orElseGet(() -> collaborator.getStores().stream()
+                                    .map(Store::getMarket)
+                                    .filter(market -> market.getId().equals(marketId))
+                                    .findFirst()
+                                    .orElseThrow(() -> new BusinessException("La Tienda seleccionada no tiene un Espacio asociado."))));
+                    stockStore.setCode("STOCK-" + marketId);
+                    stockStore.setName("Stock principal");
+                    stockStore.setType(StoreType.STOCK);
+                    stockStore.setStatus(StoreStatus.ACTIVE);
+                    return storeRepository.save(stockStore);
+                });
     }
 
     @Transactional
@@ -317,7 +398,7 @@ public class PickupService {
     }
 
     private void requireCreateAccess() {
-        accessControlService.requireAnyRole(RoleCode.ADMIN_MARKET, RoleCode.STORE_USER);
+        accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.STORE_USER);
     }
 
     private void requireOperationalAccess() {

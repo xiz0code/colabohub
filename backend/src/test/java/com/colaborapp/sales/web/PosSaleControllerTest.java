@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.colaborapp.common.exception.BusinessException;
 import com.colaborapp.common.exception.GlobalExceptionHandler;
+import com.colaborapp.common.web.dto.PageResponse;
 import com.colaborapp.sales.domain.PaymentMethod;
 import com.colaborapp.sales.domain.SaleItemPricingType;
 import com.colaborapp.sales.domain.SaleStatus;
@@ -58,12 +59,13 @@ class PosSaleControllerTest {
 
     @Test
     void shouldListSales() throws Exception {
-        when(posSaleService.listSales()).thenReturn(List.of(summary(1L, SaleStatus.CONFIRMED)));
+        when(posSaleService.listSales(null, null, null, 0, 25))
+                .thenReturn(new PageResponse<>(List.of(summary(1L, SaleStatus.CONFIRMED)), 0, 25, 1, 1, true, true, false));
 
         mockMvc.perform(get("/api/pos/sales"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].saleNumber").value("S-2026-00000001"))
-                .andExpect(jsonPath("$[0].ivaAmount").value(1900.00));
+                .andExpect(jsonPath("$.content[0].saleNumber").value("S-2026-00000001"))
+                .andExpect(jsonPath("$.content[0].ivaAmount").value(1900.00));
     }
 
     @Test

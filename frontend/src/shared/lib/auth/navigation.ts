@@ -13,6 +13,8 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
     { to: "/vendedores", label: "Vendedores" },
     { to: "/reports/collaborators", label: "Reportes" },
     { to: "/closings", label: "Cierres" },
+    { to: "/sales", label: "Ventas" },
+    { to: "/pickups", label: "Retiros" },
     { to: "/commissions", label: "Configuracion" },
   ],
   ADMIN_MARKET: [

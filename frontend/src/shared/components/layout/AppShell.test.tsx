@@ -55,7 +55,8 @@ describe("AppShell", () => {
     expect(screen.getByText("Tiendas")).toBeInTheDocument();
     expect(screen.getByText("Vendedores")).toBeInTheDocument();
     expect(screen.getByText("Configuracion")).toBeInTheDocument();
-    expect(screen.queryByText("Ventas")).not.toBeInTheDocument();
+    expect(screen.getByText("Ventas")).toBeInTheDocument();
+    expect(screen.getByText("Retiros")).toBeInTheDocument();
   });
 
   it("keeps Administrador de Espacio navigation visible across route changes", async () => {

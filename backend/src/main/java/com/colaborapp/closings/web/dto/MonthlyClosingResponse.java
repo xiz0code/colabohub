@@ -17,5 +17,6 @@ public record MonthlyClosingResponse(
         BigDecimal totalIvaToPayAmount,
         Instant closedAt,
         String closedBy,
+        List<ClosingPaymentMethodSummaryResponse> paymentMethods,
         List<MonthlyClosingCollaboratorResponse> collaborators) {
 }

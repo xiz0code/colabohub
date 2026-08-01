@@ -1,10 +1,12 @@
 package com.colaborapp.reports.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,11 +20,15 @@ import org.springframework.transaction.annotation.Transactional;
 import com.colaborapp.common.exception.ResourceNotFoundException;
 import com.colaborapp.config.bootstrap.CurrentTenantProvider;
 import com.colaborapp.markets.repository.MarketRepository;
+import com.colaborapp.pickups.domain.PickupStatus;
+import com.colaborapp.pickups.repository.PickupRepository;
 import com.colaborapp.reports.web.dto.SaleDetailStoreSummaryResponse;
 import com.colaborapp.reports.web.dto.SaleTodayDetailResponse;
 import com.colaborapp.reports.web.dto.CollaboratorSaleEntryResponse;
 import com.colaborapp.reports.web.dto.CollaboratorSalesReportResponse;
 import com.colaborapp.reports.web.dto.DashboardSummaryResponse;
+import com.colaborapp.reports.web.dto.DashboardPaymentMethodResponse;
+import com.colaborapp.reports.web.dto.DashboardTrendPointResponse;
 import com.colaborapp.reports.web.dto.MarketPayoutsTodayResponse;
 import com.colaborapp.reports.web.dto.MarketSalesTodayReportResponse;
 import com.colaborapp.reports.web.dto.MarketStoreSalesSummaryResponse;
@@ -59,6 +65,7 @@ public class SalesReportService {
     private final StoreRepository storeRepository;
     private final MarketRepository marketRepository;
     private final ProductRepository productRepository;
+    private final PickupRepository pickupRepository;
     private final UserRepository userRepository;
     private final CurrentTenantProvider currentTenantProvider;
     private final AccessControlService accessControlService;
@@ -71,6 +78,7 @@ public class SalesReportService {
             StoreRepository storeRepository,
             MarketRepository marketRepository,
             ProductRepository productRepository,
+            PickupRepository pickupRepository,
             UserRepository userRepository,
             CurrentTenantProvider currentTenantProvider,
             AccessControlService accessControlService,
@@ -81,6 +89,7 @@ public class SalesReportService {
         this.storeRepository = storeRepository;
         this.marketRepository = marketRepository;
         this.productRepository = productRepository;
+        this.pickupRepository = pickupRepository;
         this.userRepository = userRepository;
         this.currentTenantProvider = currentTenantProvider;
         this.accessControlService = accessControlService;
@@ -119,15 +128,30 @@ public class SalesReportService {
     public DashboardSummaryResponse getDashboardSummary() {
         ScopedSalesSnapshot snapshot = buildScopedSalesSnapshot();
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        LocalDate businessDate = snapshot.businessDate();
+        Instant trendStartAt = businessDate.minusDays(6).atStartOfDay(businessZone).toInstant();
+        Instant trendEndAt = businessDate.plusDays(1).atStartOfDay(businessZone).toInstant();
+        List<SaleItem> trendItems = loadScopedItems(tenantId, trendStartAt, trendEndAt);
+        List<DashboardTrendPointResponse> trend = buildDashboardTrend(businessDate, trendItems);
+        DashboardTrendPointResponse previousDay = trend.stream()
+                .filter(point -> point.date().equals(businessDate.minusDays(1)))
+                .findFirst()
+                .orElse(new DashboardTrendPointResponse(businessDate.minusDays(1), 0L, BigDecimal.ZERO, BigDecimal.ZERO));
 
         return new DashboardSummaryResponse(
-                snapshot.businessDate(),
+                businessDate,
                 snapshot.salesCount(),
                 snapshot.totalAmount(),
                 snapshot.totalCommission(),
                 snapshot.totalNet(),
                 countActiveProducts(tenantId),
                 countLowStockProducts(tenantId),
+                countPendingPickups(tenantId),
+                previousDay.salesCount(),
+                previousDay.totalAmount(),
+                calculateChangePercentage(snapshot.totalAmount(), previousDay.totalAmount()),
+                trend,
+                buildPaymentMethodSummary(trendItems, businessDate),
                 snapshot.storeSummaries());
     }
 
@@ -392,6 +416,92 @@ public class SalesReportService {
         return buildSnapshotFromItems(range.businessDate(), visibleItems);
     }
 
+    private List<SaleItem> loadScopedItems(Long tenantId, Instant startAt, Instant endAt) {
+        Set<Long> activeCollaboratorIds = resolveActiveStoreUserIds();
+        if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+            Long collaboratorUserId = accessControlService.getCurrentUser().user().getId();
+            return filterVisibleItems(
+                    saleItemRepository.findAllByCollaboratorAndPeriodWithDetails(
+                            tenantId,
+                            collaboratorUserId,
+                            SaleStatus.CONFIRMED,
+                            startAt,
+                            endAt),
+                    activeCollaboratorIds);
+        }
+
+        return filterVisibleItems(
+                saleItemRepository.findAllByTenantAndPeriodWithDetails(
+                        tenantId,
+                        SaleStatus.CONFIRMED,
+                        startAt,
+                        endAt),
+                activeCollaboratorIds);
+    }
+
+    private List<DashboardTrendPointResponse> buildDashboardTrend(LocalDate businessDate, List<SaleItem> items) {
+        Map<LocalDate, DashboardDayAggregate> days = new LinkedHashMap<>();
+        for (int offset = 6; offset >= 0; offset--) {
+            LocalDate date = businessDate.minusDays(offset);
+            days.put(date, new DashboardDayAggregate(date));
+        }
+
+        for (SaleItem item : items) {
+            if (item.getSale().getConfirmedAt() == null) {
+                continue;
+            }
+            LocalDate date = item.getSale().getConfirmedAt().atZone(businessZone).toLocalDate();
+            DashboardDayAggregate day = days.get(date);
+            if (day != null) {
+                day.add(item);
+            }
+        }
+
+        return days.values().stream().map(DashboardDayAggregate::toResponse).toList();
+    }
+
+    private List<DashboardPaymentMethodResponse> buildPaymentMethodSummary(List<SaleItem> items, LocalDate businessDate) {
+        Map<String, DashboardPaymentAggregate> summaries = new LinkedHashMap<>();
+        for (SaleItem item : items) {
+            if (item.getSale().getConfirmedAt() == null
+                    || !item.getSale().getConfirmedAt().atZone(businessZone).toLocalDate().equals(businessDate)) {
+                continue;
+            }
+            String paymentMethod = item.getSale().getPaymentMethod() == null
+                    ? "UNKNOWN"
+                    : item.getSale().getPaymentMethod().name();
+            summaries.computeIfAbsent(paymentMethod, DashboardPaymentAggregate::new).add(item);
+        }
+        return summaries.values().stream()
+                .sorted((left, right) -> right.totalAmount.compareTo(left.totalAmount))
+                .map(DashboardPaymentAggregate::toResponse)
+                .toList();
+    }
+
+    private BigDecimal calculateChangePercentage(BigDecimal currentAmount, BigDecimal previousAmount) {
+        if (previousAmount == null || previousAmount.compareTo(BigDecimal.ZERO) == 0) {
+            return currentAmount != null && currentAmount.compareTo(BigDecimal.ZERO) > 0
+                    ? new BigDecimal("100.00")
+                    : BigDecimal.ZERO.setScale(2);
+        }
+        return currentAmount.subtract(previousAmount)
+                .multiply(new BigDecimal("100"))
+                .divide(previousAmount, 2, RoundingMode.HALF_UP);
+    }
+
+    private long countPendingPickups(Long tenantId) {
+        boolean isSystemAdmin = accessControlService.hasRole(RoleCode.ADMIN_SYSTEM);
+        boolean isStoreUser = accessControlService.hasRole(RoleCode.STORE_USER);
+        List<Long> marketIds = isSystemAdmin ? List.of() : accessControlService.currentMarketIds();
+        Long collaboratorUserId = isStoreUser ? accessControlService.getCurrentUser().user().getId() : null;
+        return pickupRepository.countDashboardPending(
+                tenantId,
+                marketIds,
+                marketIds.isEmpty(),
+                collaboratorUserId,
+                List.of(PickupStatus.PENDING, PickupStatus.CHECKOUT_IN_PROGRESS));
+    }
+
     private ScopedSalesSnapshot buildSnapshotFromItems(LocalDate businessDate, List<SaleItem> items) {
         Map<Long, SaleAggregate> sales = new LinkedHashMap<>();
         Map<Long, StoreAggregate> stores = new LinkedHashMap<>();
@@ -566,6 +676,46 @@ public class SalesReportService {
                 marketIds,
                 ProductStatus.ACTIVE,
                 LOW_STOCK_THRESHOLD);
+    }
+
+    private static final class DashboardDayAggregate {
+        private final LocalDate date;
+        private final Set<Long> saleIds = new HashSet<>();
+        private BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
+        private BigDecimal totalNet = BigDecimal.ZERO.setScale(4);
+
+        private DashboardDayAggregate(LocalDate date) {
+            this.date = date;
+        }
+
+        private void add(SaleItem item) {
+            saleIds.add(item.getSale().getId());
+            totalAmount = totalAmount.add(item.getSubtotal());
+            totalNet = totalNet.add(item.getNetAmount());
+        }
+
+        private DashboardTrendPointResponse toResponse() {
+            return new DashboardTrendPointResponse(date, saleIds.size(), totalAmount, totalNet);
+        }
+    }
+
+    private static final class DashboardPaymentAggregate {
+        private final String paymentMethod;
+        private final Set<Long> saleIds = new HashSet<>();
+        private BigDecimal totalAmount = BigDecimal.ZERO.setScale(4);
+
+        private DashboardPaymentAggregate(String paymentMethod) {
+            this.paymentMethod = paymentMethod;
+        }
+
+        private void add(SaleItem item) {
+            saleIds.add(item.getSale().getId());
+            totalAmount = totalAmount.add(item.getSubtotal());
+        }
+
+        private DashboardPaymentMethodResponse toResponse() {
+            return new DashboardPaymentMethodResponse(paymentMethod, saleIds.size(), totalAmount);
+        }
     }
 
     private static final class SaleAggregate {

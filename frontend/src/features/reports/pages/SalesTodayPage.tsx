@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays, CircleDollarSign, PackageCheck, ReceiptText, type LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
@@ -153,7 +154,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
         title={isCollaborator ? "Mis ventas" : activeTab === "collaborators" ? "Reporte por tienda" : "Reportes de ventas"}
         description={
           isCollaborator
-            ? "Consulta el detalle mensual de tu Tienda, el resumen financiero del periodo y tus ventas mas recientes."
+            ? "Revisa primero el movimiento de hoy y consulta después el detalle acumulado de tu Tienda."
             : activeTab === "collaborators"
               ? "Analiza el resultado de cada Tienda con rango de fechas, acumulados y detalle por producto."
               : "Consulta el movimiento diario de ventas confirmado dentro de tu alcance."
@@ -206,7 +207,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
 
       {salesTodayQuery.data ? (
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {!isCollaborator ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard label="Ventas confirmadas de hoy" value={String(salesTodayQuery.data.salesCount)} />
             <MetricCard label="Monto de hoy" value={formatMoney(salesTodayQuery.data.totalAmount)} />
             <MetricCard
@@ -214,16 +215,17 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
               value={formatMoney(isCollaborator ? dailyAverageTicket : salesTodayQuery.data.totalCommission)}
             />
             <MetricCard label="Neto de hoy" value={formatMoney(salesTodayQuery.data.totalNet)} />
-          </div>
+          </div> : null}
 
           {isCollaborator ? (
-            <>
-              <div className="soft-surface p-6">
+            <div className="flex flex-col gap-6">
+              <div data-testid="monthly-sales-section" className="soft-surface order-2 p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold">Detalle mensual de ventas</h2>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Histórico y cuadratura</p>
+                    <h2 className="mt-2 text-lg font-semibold">Detalle mensual de ventas</h2>
                     <p className="text-sm text-muted-foreground">
-                      Esta tabla concentra tu informacion mas importante: producto vendido, comisiones, IVA y resultado final.
+                      Consulta el acumulado del periodo, comisiones, IVA y resultado final cuando necesites revisar el mes.
                     </p>
                   </div>
 
@@ -352,8 +354,55 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                 ) : null}
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
-                <div className="soft-surface p-6">
+              <section
+                data-testid="daily-sales-section"
+                className="order-1 border-y border-violet-100/80 bg-white/55 px-4 py-6 shadow-[0_18px_52px_rgba(126,94,173,0.10)] sm:px-6"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-violet-700">
+                      <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em]">Tu jornada de hoy</p>
+                    </div>
+                    <h2 className="mt-2 text-2xl font-bold text-foreground">Así se están moviendo tus ventas</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Revisa primero lo que pasó hoy y detecta rápidamente tus ventas y productos con mayor movimiento.
+                    </p>
+                  </div>
+                  <span className="inline-flex w-fit items-center rounded-full border border-violet-100 bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-800">
+                    {formatBusinessDate(salesTodayQuery.data.businessDate)}
+                  </span>
+                </div>
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <DailyMetric
+                    icon={ReceiptText}
+                    label="Ventas confirmadas"
+                    value={String(salesTodayQuery.data.salesCount)}
+                    tone="violet"
+                  />
+                  <DailyMetric
+                    icon={CircleDollarSign}
+                    label="Total vendido"
+                    value={formatMoney(salesTodayQuery.data.totalAmount)}
+                    tone="emerald"
+                  />
+                  <DailyMetric
+                    icon={PackageCheck}
+                    label="Ticket promedio"
+                    value={formatMoney(dailyAverageTicket)}
+                    tone="sky"
+                  />
+                  <DailyMetric
+                    icon={CircleDollarSign}
+                    label="Total a recibir"
+                    value={formatMoney(salesTodayQuery.data.totalNet)}
+                    tone="amber"
+                  />
+                </div>
+
+                <div className="mt-6 grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
+                <div className="min-w-0 border-t border-violet-100/80 pt-5 xl:border-r xl:border-t-0 xl:pr-6">
                   <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                     <div>
                       <h2 className="text-lg font-semibold">Productos con mejor movimiento hoy</h2>
@@ -408,7 +457,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                   )}
                 </div>
 
-                <div className="soft-surface p-6">
+                <div className="min-w-0 border-t border-violet-100/80 pt-5 xl:border-t-0 xl:pl-1">
                   <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                     <div>
                       <h2 className="text-lg font-semibold">Ultimas ventas confirmadas</h2>
@@ -429,7 +478,7 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                   ) : (
                     <div className="mt-5 space-y-3">
                       {salesTodayQuery.data.sales.map((sale) => (
-                        <article key={sale.saleId} className="rounded-[24px] border border-white/85 bg-white/75 px-4 py-4 shadow-sm">
+                        <article key={sale.saleId} className="rounded-lg border border-white/85 bg-white/80 px-4 py-4 shadow-sm">
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-foreground">{sale.saleNumber}</p>
@@ -449,8 +498,9 @@ export function SalesTodayPage({ defaultTab = "today" }: { defaultTab?: SalesRep
                     </div>
                   )}
                 </div>
-              </div>
-            </>
+                </div>
+              </section>
+            </div>
           ) : null}
 
           {showCollaboratorPanel ? (
@@ -849,6 +899,35 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function DailyMetric({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  tone: "violet" | "emerald" | "sky" | "amber";
+}) {
+  const toneClasses = {
+    violet: "border-violet-100 bg-violet-50/75 text-violet-900",
+    emerald: "border-emerald-100 bg-emerald-50/75 text-emerald-900",
+    sky: "border-sky-100 bg-sky-50/75 text-sky-900",
+    amber: "border-amber-100 bg-amber-50/75 text-amber-900",
+  }[tone];
+
+  return (
+    <div className={["min-w-0 rounded-lg border p-4 shadow-sm", toneClasses].join(" ")}>
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">
+        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      <p className="mt-3 break-words text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
 function FinancialSummaryPanel({
   totalAmount,
   clientNetAmount,
@@ -947,6 +1026,16 @@ function formatMoney(value: number) {
     currency: "CLP",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatBusinessDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = year && month && day ? new Date(year, month - 1, day) : new Date(value);
+  return new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(date);
 }
 
 function formatDecimal(value: number) {

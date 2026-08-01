@@ -93,6 +93,11 @@ describe("SalesTodayPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Detalle mensual de ventas")).toBeInTheDocument();
     });
+    const dailySection = screen.getByTestId("daily-sales-section");
+    const monthlySection = screen.getByTestId("monthly-sales-section");
+    expect(dailySection).toHaveClass("order-1");
+    expect(monthlySection).toHaveClass("order-2");
+    expect(screen.getByText("Tu jornada de hoy")).toBeInTheDocument();
     expect(screen.getByText("Todavia no tienes ventas en este periodo")).toBeInTheDocument();
     expect(screen.getByText("Sin productos vendidos hoy")).toBeInTheDocument();
     expect(screen.getByText("Ultimas ventas confirmadas")).toBeInTheDocument();

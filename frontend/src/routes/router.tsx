@@ -1,10 +1,10 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "@/features/auth/components/RequireAuth";
 import { RequireRole } from "@/features/auth/components/RequireRole";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { useSession } from "@/features/auth/session/SessionProvider";
-import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
 import { MarketsPage } from "@/features/markets/pages/MarketsPage";
 import { ProductsPage } from "@/features/products/pages/ProductsPage";
 import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
@@ -16,6 +16,11 @@ import { UsersPage } from "@/features/users/pages/UsersPage";
 import { AppShell } from "@/shared/components/layout/AppShell";
 import { StoresPage } from "@/features/stores/pages/StoresPage";
 import { PickupsPage } from "@/features/pickups/pages/PickupsPage";
+import { PromotionsPage } from "@/features/promotions/pages/PromotionsPage";
+
+const DashboardPage = lazy(() =>
+  import("@/features/dashboard/pages/DashboardPage").then((module) => ({ default: module.DashboardPage })),
+);
 
 export function AppRouter() {
   return (
@@ -30,7 +35,14 @@ export function AppRouter() {
           <Route path="/legacy/sellers" element={<Navigate to="/vendedores" replace />} />
 
           <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM", "ADMIN_MARKET", "COLLABORATOR", "STORE_USER"]} />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route
+              path="/dashboard"
+              element={
+                <Suspense fallback={<div className="py-8 text-sm text-muted-foreground">Cargando dashboard...</div>}>
+                  <DashboardPage />
+                </Suspense>
+              }
+            />
           </Route>
 
           <Route element={<RequireRole allowedRoles={["STORE_USER"]} />}>
@@ -61,6 +73,10 @@ export function AppRouter() {
 
           <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM", "ADMIN_MARKET", "STORE_USER", "SELLER"]} />}>
             <Route path="/products" element={<ProductsPage />} />
+          </Route>
+
+          <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM", "ADMIN_MARKET", "STORE_USER"]} />}>
+            <Route path="/promotions" element={<PromotionsPage />} />
           </Route>
 
           <Route element={<RequireRole allowedRoles={["ADMIN_SYSTEM", "ADMIN_MARKET"]} />}>

@@ -37,6 +37,7 @@ import com.colaborapp.pickups.repository.PickupRepository;
 import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
+import com.colaborapp.products.service.ProductAuditService;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.security.AuthenticatedUserService;
 import com.colaborapp.sales.domain.PaymentMethod;
@@ -111,6 +112,9 @@ class PosSaleServiceTest {
 
     @Mock
     private CommissionSettingsService commissionSettingsService;
+
+    @Mock
+    private ProductAuditService productAuditService;
 
     @InjectMocks
     private PosSaleService posSaleService;

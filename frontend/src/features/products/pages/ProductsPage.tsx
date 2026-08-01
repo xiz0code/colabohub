@@ -1,4 +1,4 @@
-import { FormEvent, type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
@@ -10,6 +10,7 @@ import {
   increaseProductStock,
   importProductsCsv,
   importStockReductionsCsv,
+  listRecentBarcodeLabelProducts,
   listPromotionGroups,
   listProducts,
   printBarcodeLabels,
@@ -22,6 +23,7 @@ import {
   updateProduct,
   updateProductStatus,
 } from "@/features/products/api/productApi";
+import { assignProductsToPromotion, listPromotions, type PromotionCampaign } from "@/features/promotions/api/promotionApi";
 import { listUsers } from "@/features/users/api/userApi";
 import { EmptyState } from "@/shared/components/feedback/EmptyState";
 import { FeedbackMessage } from "@/shared/components/feedback/FeedbackMessage";
@@ -63,6 +65,11 @@ type StockReductionModalState = {
 type StockIncreaseModalState = {
   product: Product;
   quantity: string;
+};
+
+type PromotionAssignmentModalState = {
+  products: Product[];
+  promotionId: string;
 };
 
 const EMPTY_FORM: ProductFormState = {
@@ -117,10 +124,12 @@ export function ProductsPage() {
   const [createForm, setCreateForm] = useState<ProductFormState>(EMPTY_FORM);
   const [editForm, setEditForm] = useState<ProductFormState>(EMPTY_FORM);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
+  const [selectedProductsById, setSelectedProductsById] = useState<Record<number, Product>>({});
   const [barcodeModal, setBarcodeModal] = useState<BarcodeModalState | null>(null);
   const [importModal, setImportModal] = useState<ImportModalState | null>(null);
   const [stockReductionModal, setStockReductionModal] = useState<StockReductionModalState | null>(null);
   const [stockIncreaseModal, setStockIncreaseModal] = useState<StockIncreaseModalState | null>(null);
+  const [promotionAssignmentModal, setPromotionAssignmentModal] = useState<PromotionAssignmentModalState | null>(null);
   const [lowStockExpanded, setLowStockExpanded] = useState(false);
   const totalBarcodeLabels = useMemo(
     () =>
@@ -194,6 +203,11 @@ export function ProductsPage() {
     queryFn: () => listPromotionGroups({ ownerUserId: editOwnerUserId }),
     enabled: !isSeller && Boolean(editOwnerUserId),
   });
+  const recentBarcodeProductsQuery = useQuery({
+    queryKey: ["products", "barcode-labels", "recent", 24],
+    queryFn: () => listRecentBarcodeLabelProducts(24),
+    enabled: canPrintBarcodes,
+  });
   const resolvedLowStockThreshold = useMemo(() => {
     const parsed = Number(lowStockThreshold);
     if (Number.isFinite(parsed) && parsed >= 0) {
@@ -211,6 +225,8 @@ export function ProductsPage() {
 
   useEffect(() => {
     setProductsPage(0);
+    setSelectedProductIds([]);
+    setSelectedProductsById({});
   }, [search, selectedOwnerId, stockViewFilter]);
 
   useEffect(() => {
@@ -240,9 +256,13 @@ export function ProductsPage() {
   );
 
   const selectedProducts = useMemo(
-    () => filteredProducts.filter((product) => selectedProductIds.includes(product.id)),
-    [filteredProducts, selectedProductIds],
+    () => selectedProductIds.map((id) => selectedProductsById[id]).filter((product): product is Product => Boolean(product)),
+    [selectedProductIds, selectedProductsById],
   );
+  const selectedPromotionOwnerId = useMemo(() => {
+    const ownerIds = new Set(selectedProducts.map((product) => product.ownerUserId).filter((ownerId): ownerId is number => typeof ownerId === "number"));
+    return ownerIds.size === 1 ? Array.from(ownerIds)[0] : null;
+  }, [selectedProducts]);
   const lowStockProducts = useMemo(
     () =>
       (productsQuery.data?.content ?? [])
@@ -267,12 +287,6 @@ export function ProductsPage() {
       setEditForm(nextForm);
     }
   }, [currentUserId, editProduct, isStoreUser]);
-
-  useEffect(() => {
-    setSelectedProductIds((current) =>
-      current.filter((id) => filteredProducts.some((product) => product.id === id)),
-    );
-  }, [filteredProducts]);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -324,6 +338,11 @@ export function ProductsPage() {
       setFeedback({ kind: "success", message: `${product.name} fue eliminado del catalogo activo.` });
       setProductToDelete(null);
       setSelectedProductIds((current) => current.filter((id) => id !== product.id));
+      setSelectedProductsById((current) => {
+        const next = { ...current };
+        delete next[product.id];
+        return next;
+      });
       await queryClient.invalidateQueries({ queryKey: ["products"] });
     },
     onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos eliminar el producto.") }),
@@ -343,6 +362,31 @@ export function ProductsPage() {
     },
     onError: (error) =>
       setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos aumentar el stock del producto.") }),
+  });
+
+  const promotionAssignmentOptionsQuery = useQuery({
+    queryKey: ["promotions", "assignment", selectedPromotionOwnerId],
+    queryFn: () => listPromotions({ ownerUserId: selectedPromotionOwnerId ?? undefined }),
+    enabled: promotionAssignmentModal !== null && selectedPromotionOwnerId !== null,
+  });
+
+  const promotionAssignmentMutation = useMutation({
+    mutationFn: () =>
+      assignProductsToPromotion(
+        Number(promotionAssignmentModal!.promotionId),
+        promotionAssignmentModal!.products.map((product) => product.id),
+      ),
+    onSuccess: async () => {
+      setFeedback({ kind: "success", message: "Productos agregados a la promocion." });
+      setPromotionAssignmentModal(null);
+      setSelectedProductIds([]);
+      setSelectedProductsById({});
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["products"] }),
+        queryClient.invalidateQueries({ queryKey: ["promotions"] }),
+      ]);
+    },
+    onError: (error) => setFeedback({ kind: "error", message: getErrorMessage(error, "No pudimos asignar la promocion.") }),
   });
 
   const deletePromotionGroupMutation = useMutation({
@@ -439,6 +483,42 @@ export function ProductsPage() {
   const allVisibleSelected =
     filteredProducts.length > 0 &&
     filteredProducts.every((product) => selectedProductIds.includes(product.id));
+
+  const toggleProductSelection = (product: Product) => {
+    setSelectedProductIds((current) => (current.includes(product.id) ? current.filter((id) => id !== product.id) : [...current, product.id]));
+    setSelectedProductsById((current) => {
+      if (current[product.id]) {
+        const next = { ...current };
+        delete next[product.id];
+        return next;
+      }
+      return { ...current, [product.id]: product };
+    });
+  };
+
+  const toggleVisibleSelection = () => {
+    if (allVisibleSelected) {
+      const visibleIds = new Set(filteredProducts.map((product) => product.id));
+      setSelectedProductIds((current) => current.filter((id) => !visibleIds.has(id)));
+      setSelectedProductsById((current) => {
+        const next = { ...current };
+        visibleIds.forEach((id) => {
+          delete next[id];
+        });
+        return next;
+      });
+      return;
+    }
+
+    setSelectedProductIds((current) => Array.from(new Set([...current, ...filteredProducts.map((product) => product.id)])));
+    setSelectedProductsById((current) => {
+      const next = { ...current };
+      filteredProducts.forEach((product) => {
+        next[product.id] = product;
+      });
+      return next;
+    });
+  };
 
   const handleIncreaseStockSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -662,24 +742,63 @@ export function ProductsPage() {
             {!isSeller ? <span className="soft-chip">{selectedProductIds.length} seleccionados</span> : null}
           </div>
           {canPrintBarcodes ? (
-            <button
-              type="button"
-              onClick={() =>
-                setBarcodeModal({
-                  format: "A4",
-                  items: selectedProducts.map((product) => ({
-                    productId: product.id,
-                    productName: product.name,
-                    quantity: String(product.stock),
-                    stockQuantity: product.stock,
-                  })),
-                })
-              }
-              disabled={selectedProducts.length === 0}
-              className="rounded-full border border-white/90 bg-white/80 px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Imprimir codigos seleccionados
-            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedPromotionOwnerId === null) {
+                    setFeedback({ kind: "error", message: "Selecciona productos de una sola Tienda para agregarlos a una promocion." });
+                    return;
+                  }
+                  setPromotionAssignmentModal({ products: selectedProducts, promotionId: "" });
+                }}
+                disabled={selectedProducts.length === 0}
+                className="rounded-full border border-fuchsia-100 bg-white/85 px-4 py-2.5 text-sm font-semibold text-fuchsia-700 shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Agregar a promocion productos seleccionados
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setBarcodeModal({
+                    format: "A4",
+                    items: selectedProducts.map((product) => ({
+                      productId: product.id,
+                      productName: product.name,
+                      quantity: String(product.stock),
+                      stockQuantity: product.stock,
+                    })),
+                  })
+                }
+                disabled={selectedProducts.length === 0}
+                className="rounded-full border border-white/90 bg-white/80 px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Imprimir codigos seleccionados
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const recentItems = (recentBarcodeProductsQuery.data ?? []).filter((item) => item.labelQuantity > 0);
+                  if (recentItems.length === 0) {
+                    setFeedback({ kind: "info", message: "No encontramos productos nuevos o con aumento de stock en las ultimas 24 horas." });
+                    return;
+                  }
+                  setBarcodeModal({
+                    format: "A4",
+                    items: recentItems.map((item) => ({
+                      productId: item.product.id,
+                      productName: item.product.name,
+                      quantity: String(item.labelQuantity),
+                      stockQuantity: item.product.stock,
+                    })),
+                  });
+                }}
+                disabled={recentBarcodeProductsQuery.isLoading || (recentBarcodeProductsQuery.data?.length ?? 0) === 0}
+                className="rounded-full border border-emerald-100 bg-emerald-50/90 px-4 py-2.5 text-sm font-semibold text-emerald-700 shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Imprimir ultimas 24h
+              </button>
+            </div>
           ) : null}
         </div>
 
@@ -716,11 +835,7 @@ export function ProductsPage() {
                         <input
                           type="checkbox"
                           checked={allVisibleSelected}
-                          onChange={() =>
-                            setSelectedProductIds(
-                              allVisibleSelected ? [] : filteredProducts.map((product) => product.id),
-                            )
-                          }
+                          onChange={toggleVisibleSelection}
                         />
                         <span>Producto</span>
                       </label>
@@ -748,7 +863,7 @@ export function ProductsPage() {
                           <input
                             type="checkbox"
                             checked={selectedProductIds.includes(product.id)}
-                            onChange={() => toggleSelection(product.id, setSelectedProductIds)}
+                            onChange={() => toggleProductSelection(product)}
                           />
                           <div>
                             <p className="font-semibold">{product.name}</p>
@@ -886,6 +1001,75 @@ export function ProductsPage() {
           </div>
         ) : null}
       </div>
+
+      <Modal
+        open={promotionAssignmentModal !== null}
+        onClose={() => {
+          if (!promotionAssignmentMutation.isPending) {
+            setPromotionAssignmentModal(null);
+          }
+        }}
+        title="Agregar productos a promocion"
+        description="Selecciona una promocion vigente de esta Tienda. Si el producto tenia otra promocion, se reemplazara por esta."
+        footer={
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setPromotionAssignmentModal(null)} className="rounded-full border border-white/90 bg-white/80 px-4 py-2.5 text-sm font-semibold text-muted-foreground">
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => promotionAssignmentMutation.mutate()}
+              disabled={promotionAssignmentMutation.isPending || !promotionAssignmentModal?.promotionId}
+              className="rounded-full bg-[linear-gradient(135deg,rgba(192,162,244,1),rgba(247,175,215,0.96))] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {promotionAssignmentMutation.isPending ? "Agregando..." : "Agregar a promocion"}
+            </button>
+          </div>
+        }
+      >
+        <div className="grid gap-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <InfoCard label="Productos" value={String(promotionAssignmentModal?.products.length ?? 0)} />
+            <InfoCard label="Tienda" value={promotionAssignmentModal?.products[0]?.ownerFullName ?? "Sin Tienda"} />
+            <InfoCard label="Promociones" value={String(activePromotionOptions(promotionAssignmentOptionsQuery.data).length)} />
+          </div>
+
+          {promotionAssignmentOptionsQuery.isLoading ? <FeedbackMessage kind="info" message="Cargando promociones vigentes..." /> : null}
+          {promotionAssignmentOptionsQuery.isError ? (
+            <FeedbackMessage kind="error" message={getErrorMessage(promotionAssignmentOptionsQuery.error, "No pudimos cargar las promociones.")} />
+          ) : null}
+
+          <label className="grid gap-2 text-sm">
+            <span>Promocion vigente</span>
+            <select
+              value={promotionAssignmentModal?.promotionId ?? ""}
+              onChange={(event) =>
+                setPromotionAssignmentModal((current) => current ? { ...current, promotionId: event.target.value } : current)
+              }
+              className="rounded-2xl border border-input bg-background px-3 py-2.5"
+            >
+              <option value="">Selecciona una promocion</option>
+              {activePromotionOptions(promotionAssignmentOptionsQuery.data).map((promotion) => (
+                <option key={promotion.id} value={promotion.id}>
+                  {promotion.name} - {describePromotionCampaign(promotion)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="max-h-64 overflow-y-auto rounded-[22px] border border-white/80 bg-white/70 p-3">
+            {promotionAssignmentModal?.products.map((product) => (
+              <div key={product.id} className="flex items-center justify-between gap-3 border-b border-border/50 px-2 py-3 last:border-b-0">
+                <div>
+                  <p className="font-medium">{product.name}</p>
+                  <p className="text-sm text-muted-foreground">SKU: {product.sku}</p>
+                </div>
+                <span className="soft-chip">Stock {product.stock}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={canDeleteProducts && productToDelete !== null}
@@ -1810,13 +1994,14 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
 }
 
 function AuditRow({ entry }: { entry: ProductAuditLog }) {
+  const detail = describeAuditEntry(entry);
   return (
     <div className="rounded-[22px] border border-white/80 bg-white/80 px-4 py-4 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-medium">{entry.fieldName}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {entry.previousValue ?? "Sin valor previo"} {"->"} {entry.newValue ?? "Sin valor nuevo"}
+            {detail}
           </p>
         </div>
         <div className="text-right text-xs text-muted-foreground">
@@ -1826,6 +2011,37 @@ function AuditRow({ entry }: { entry: ProductAuditLog }) {
       </div>
     </div>
   );
+}
+
+function describeAuditEntry(entry: ProductAuditLog) {
+  if (entry.fieldName === "Stock agregado") {
+    const previousStock = parsePlainNumber(entry.previousValue);
+    const finalStock = parsePlainNumber(entry.newValue);
+    if (previousStock !== null && finalStock !== null) {
+      return `Stock previo: ${previousStock} | Subio: ${finalStock - previousStock} | Stock final: ${finalStock}`;
+    }
+  }
+
+  if (entry.fieldName === "Stock") {
+    const previousStock = parsePlainNumber(entry.previousValue);
+    const finalStock = parsePlainNumber(entry.newValue);
+    if (previousStock !== null && finalStock !== null) {
+      const delta = finalStock - previousStock;
+      return delta > 0
+        ? `Stock previo: ${previousStock} | Subio: ${delta} | Stock final: ${finalStock}`
+        : `Stock previo: ${previousStock} | Bajo: ${Math.abs(delta)} | Stock final: ${finalStock}`;
+    }
+  }
+
+  return `${entry.previousValue ?? "Sin valor previo"} -> ${entry.newValue ?? "Sin valor nuevo"}`;
+}
+
+function parsePlainNumber(value: string | null) {
+  if (value === null || !/^-?\d+(\.\d+)?$/.test(value.trim())) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function toFormState(product: Product): ProductFormState {
@@ -1851,6 +2067,12 @@ function toFormState(product: Product): ProductFormState {
 
 function resolvePromotionType(promotion: ProductPromotion | null): ProductFormState["promotionType"] {
   if (!promotion) {
+    return "NONE";
+  }
+  if (promotion.type === "HIGHEST_PRICE_BUNDLE") {
+    return "NONE";
+  }
+  if (promotion.type === "MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT") {
     return "NONE";
   }
   return promotion.type;
@@ -1932,8 +2154,36 @@ function downloadStockReductionTemplate() {
   window.URL.revokeObjectURL(url);
 }
 
-function toggleSelection(productId: number, setSelected: Dispatch<SetStateAction<number[]>>) {
-  setSelected((current) => (current.includes(productId) ? current.filter((id) => id !== productId) : [...current, productId]));
+function activePromotionOptions(promotions: PromotionCampaign[] | undefined) {
+  const now = Date.now();
+  return (promotions ?? []).filter((promotion) => {
+    if (!promotion.active) {
+      return false;
+    }
+    if (promotion.startsAt && new Date(promotion.startsAt).getTime() > now) {
+      return false;
+    }
+    if (promotion.endsAt && new Date(promotion.endsAt).getTime() < now) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function describePromotionCampaign(promotion: PromotionCampaign) {
+  if (promotion.type === "QUANTITY_BLOCK") {
+    return `${promotion.quantity} por ${formatCurrency(promotion.promotionalPrice ?? 0)}`;
+  }
+  if (promotion.type === "HIGHEST_PRICE_BUNDLE") {
+    return `${promotion.quantity} por precio mayor`;
+  }
+  if (promotion.type === "PAYMENT_METHOD_DISCOUNT") {
+    return `${promotion.percentageDiscount}% por medio de pago`;
+  }
+  if (promotion.type === "MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT") {
+    return `${promotion.percentageDiscount}% sobre ${formatCurrency(promotion.minimumPurchaseAmount ?? 0)}`;
+  }
+  return `${promotion.percentageDiscount}% descuento`;
 }
 
 function truncate(value: string, maxLength: number) {
@@ -1946,6 +2196,12 @@ function describePromotion(promotion: ProductPromotion | null | undefined) {
   }
   if (promotion.type === "QUANTITY_BLOCK") {
     return appendPromotionEndDate(`${promotion.quantity} x ${formatCurrency(promotion.promotionalPrice ?? 0)}`, promotion.endsAt);
+  }
+  if (promotion.type === "HIGHEST_PRICE_BUNDLE") {
+    return appendPromotionEndDate(`${promotion.quantity} por precio mayor`, promotion.endsAt);
+  }
+  if (promotion.type === "MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT") {
+    return appendPromotionEndDate(`${promotion.percentageDiscount}% sobre ${formatCurrency(promotion.minimumPurchaseAmount ?? 0)}`, promotion.endsAt);
   }
   if (promotion.type === "PAYMENT_METHOD_DISCOUNT") {
     const paymentMethods = [

@@ -1,11 +1,15 @@
 package com.colaborapp.products.service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +25,7 @@ import com.colaborapp.common.exception.ResourceNotFoundException;
 import com.colaborapp.common.web.dto.PageResponse;
 import com.colaborapp.config.bootstrap.CurrentTenantProvider;
 import com.colaborapp.inventory.service.InventoryService;
+import com.colaborapp.inventory.repository.StockMovementRepository;
 import com.colaborapp.inventory.web.dto.StockAdjustmentRequest;
 import com.colaborapp.markets.domain.Market;
 import com.colaborapp.markets.repository.MarketRepository;
@@ -36,6 +41,7 @@ import com.colaborapp.products.web.dto.ProductPromotionGroupResponse;
 import com.colaborapp.products.web.dto.ProductPromotionRequest;
 import com.colaborapp.products.web.dto.ProductPromotionResponse;
 import com.colaborapp.products.web.dto.ProductResponse;
+import com.colaborapp.products.web.dto.RecentBarcodeLabelProductResponse;
 import com.colaborapp.products.web.dto.ProductSellerView;
 import com.colaborapp.products.web.dto.ProductUpdateRequest;
 import com.colaborapp.promotions.domain.ProductPromotion;
@@ -43,6 +49,8 @@ import com.colaborapp.promotions.domain.ProductPromotionGroup;
 import com.colaborapp.promotions.domain.PromotionType;
 import com.colaborapp.promotions.repository.ProductPromotionGroupRepository;
 import com.colaborapp.promotions.repository.ProductPromotionRepository;
+import com.colaborapp.sales.domain.SaleItem;
+import com.colaborapp.sales.repository.SaleItemRepository;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.stores.domain.StoreStatus;
@@ -75,6 +83,8 @@ public class ProductService {
     private final ProductPromotionGroupRepository productPromotionGroupRepository;
     private final ProductAuditService productAuditService;
     private final MarketRepository marketRepository;
+    private final StockMovementRepository stockMovementRepository;
+    private final SaleItemRepository saleItemRepository;
 
     @Transactional(readOnly = true)
     public PageResponse<?> listProducts(ProductListQuery query) {
@@ -159,6 +169,9 @@ public class ProductService {
         }
 
         productAuditService.logChange(savedProduct, "Producto creado", null, savedProduct.getName());
+        if (request.initialStock() > 0) {
+            productAuditService.logStockIncrease(savedProduct, 0, request.initialStock(), request.initialStock());
+        }
         if (request.promotion() != null) {
             productAuditService.logChange(savedProduct, "Promocion", null, describePromotion(request.promotion()));
         }
@@ -207,7 +220,13 @@ public class ProductService {
         productAuditService.logChange(product, "SKU", previousSku, product.getSku());
         productAuditService.logChange(product, "Descripcion", previousDescription, product.getDescription());
         productAuditService.logChange(product, "Precio", previousPrice, product.getSalePrice());
-        productAuditService.logChange(product, "Stock", previousStock, request.stock());
+        if (!previousStock.equals(request.stock())) {
+            if (request.stock() > previousStock) {
+                productAuditService.logStockIncrease(product, previousStock, request.stock() - previousStock, request.stock());
+            } else {
+                productAuditService.logChange(product, "Stock", previousStock, request.stock());
+            }
+        }
         productAuditService.logChange(product, "Grupo promocional", previousPromotionGroup, product.getPromotionGroup() != null ? product.getPromotionGroup().getName() : null);
         productAuditService.logChange(product, "Promocion", previousPromotion, describePromotion(request.promotion()));
 
@@ -273,7 +292,7 @@ public class ProductService {
 
         int previousStock = product.getStock();
         inventoryService.addStock(product, quantity, "AUMENTO_MANUAL");
-        productAuditService.logChange(product, "Stock agregado", previousStock, previousStock + quantity);
+        productAuditService.logStockIncrease(product, previousStock, quantity, previousStock + quantity);
         return toResponse(productRepository.findByIdAndTenantId(productId, tenantId).orElse(product));
     }
 
@@ -311,7 +330,9 @@ public class ProductService {
 
         productAuditService.logChange(product, "Precio", previousPrice, product.getSalePrice());
         productAuditService.logChange(product, "Descripcion", previousDescription, product.getDescription());
-        productAuditService.logChange(product, "Stock agregado", previousStock, previousStock + (stockToAdd == null ? 0 : stockToAdd));
+        if (stockToAdd != null && stockToAdd > 0) {
+            productAuditService.logStockIncrease(product, previousStock, stockToAdd, previousStock + stockToAdd);
+        }
         productAuditService.logChange(product, "Grupo promocional", previousPromotionGroup, product.getPromotionGroup() != null ? product.getPromotionGroup().getName() : null);
         productAuditService.logChange(product, "Promocion", previousPromotion, describePromotion(promotionRequest));
 
@@ -338,11 +359,62 @@ public class ProductService {
     }
 
     @Transactional(readOnly = true)
+    public List<RecentBarcodeLabelProductResponse> getRecentProductsForBarcodeLabels(Integer hours) {
+        accessControlService.requireAnyRole(RoleCode.ADMIN_SYSTEM, RoleCode.ADMIN_MARKET, RoleCode.STORE_USER);
+        Long tenantId = currentTenantProvider.getCurrentTenant().getId();
+        int normalizedHours = hours == null || hours <= 0 ? 24 : Math.min(hours, 168);
+        Instant since = Instant.now().minus(normalizedHours, ChronoUnit.HOURS);
+
+        List<Product> products;
+        if (accessControlService.hasRole(RoleCode.ADMIN_SYSTEM)) {
+            products = productRepository.findRecentForBarcodeLabels(tenantId, ProductStatus.ACTIVE, since);
+        } else if (accessControlService.hasRole(RoleCode.STORE_USER)) {
+            Long ownerUserId = accessControlService.getCurrentUser().user().getId();
+            products = ownerUserId == null
+                    ? List.of()
+                    : productRepository.findRecentForBarcodeLabelsByOwnerUserId(tenantId, ownerUserId, ProductStatus.ACTIVE, since);
+        } else {
+            List<Long> marketIds = accessControlService.currentMarketIds();
+            products = marketIds.isEmpty()
+                    ? List.of()
+                    : productRepository.findRecentForBarcodeLabelsByMarketIds(tenantId, marketIds, ProductStatus.ACTIVE, since);
+        }
+
+        if (products.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> productIds = products.stream().map(Product::getId).toList();
+        Map<Long, Integer> positiveStockByProductId = stockMovementRepository
+                .sumPositiveQuantityByProductIdsSince(productIds, since)
+                .stream()
+                .collect(Collectors.toMap(
+                        StockMovementRepository.ProductStockIncreaseSummary::getProductId,
+                        summary -> Math.toIntExact(summary.getQuantity())));
+
+        return products.stream()
+                .map(product -> new RecentBarcodeLabelProductResponse(
+                        toResponse(product),
+                        resolveRecentLabelQuantity(product, positiveStockByProductId.get(product.getId()), since)))
+                .filter(response -> response.labelQuantity() > 0)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ProductAuditLogResponse> getAuditTrail(Long productId) {
         Long tenantId = currentTenantProvider.getCurrentTenant().getId();
         Product product = getProductEntity(productId, tenantId);
         requireProductReadAccess(product);
-        return productAuditService.getAuditTrail(productId);
+        List<ProductAuditLogResponse> auditLogs = productAuditService.getAuditTrail(productId).stream()
+                .filter(entry -> !"Vendido".equals(entry.fieldName()))
+                .toList();
+        List<ProductAuditLogResponse> saleLogs = saleItemRepository.findConfirmedSalesByProductId(tenantId, productId).stream()
+                .map(this::toSaleAuditLog)
+                .toList();
+
+        return java.util.stream.Stream.concat(auditLogs.stream(), saleLogs.stream())
+                .sorted(java.util.Comparator.comparing(ProductAuditLogResponse::createdAt).reversed())
+                .toList();
     }
 
     private Store resolveManagedStore(Long requestedStoreId, Long tenantId) {
@@ -425,6 +497,33 @@ public class ProductService {
             return 10;
         }
         return Math.min(size, 100);
+    }
+
+    private int resolveRecentLabelQuantity(Product product, Integer positiveStockQuantity, Instant since) {
+        if (positiveStockQuantity != null && positiveStockQuantity > 0) {
+            return positiveStockQuantity;
+        }
+        if (product.getCreatedAt() != null && !product.getCreatedAt().isBefore(since)) {
+            return Math.max(product.getStock() == null ? 0 : product.getStock(), 0);
+        }
+        return 0;
+    }
+
+    private ProductAuditLogResponse toSaleAuditLog(SaleItem item) {
+        Integer quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+        String saleNumber = item.getSale() != null ? item.getSale().getSaleNumber() : null;
+        Instant confirmedAt = item.getSale() != null && item.getSale().getConfirmedAt() != null
+                ? item.getSale().getConfirmedAt()
+                : item.getCreatedAt();
+        String previous = "Venta: " + (saleNumber == null ? item.getSale().getId() : saleNumber);
+        String current = "Vendido: " + quantity + " | Total cliente: " + item.getSubtotal().setScale(0, java.math.RoundingMode.HALF_UP).toPlainString();
+        return new ProductAuditLogResponse(
+                item.getId() == null ? null : -item.getId(),
+                "Vendido",
+                previous,
+                current,
+                confirmedAt,
+                item.getSale() != null ? item.getSale().getUpdatedBy() : item.getUpdatedBy());
     }
 
     private String trimToNull(String value) {
@@ -513,11 +612,14 @@ public class ProductService {
     private ProductPromotionResponse toPromotionResponse(ProductPromotion promotion) {
         return new ProductPromotionResponse(
                 promotion.getType(),
-                promotion.getType() == PromotionType.QUANTITY_BLOCK ? promotion.getBlockQuantity() : null,
+                promotion.getType() == PromotionType.QUANTITY_BLOCK || promotion.getType() == PromotionType.HIGHEST_PRICE_BUNDLE ? promotion.getBlockQuantity() : null,
                 promotion.getType() == PromotionType.QUANTITY_BLOCK ? promotion.getBlockPrice() : null,
-                promotion.getType() == PromotionType.PERCENTAGE_DISCOUNT || promotion.getType() == PromotionType.PAYMENT_METHOD_DISCOUNT
+                promotion.getType() == PromotionType.PERCENTAGE_DISCOUNT
+                        || promotion.getType() == PromotionType.MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT
+                        || promotion.getType() == PromotionType.PAYMENT_METHOD_DISCOUNT
                         ? promotion.getPercentageDiscount()
                         : null,
+                promotion.getMinimumPurchaseAmount(),
                 promotion.isAppliesToCash(),
                 promotion.isAppliesToDebit(),
                 promotion.getEndsAt());
@@ -614,6 +716,9 @@ public class ProductService {
 
     private void syncPromotion(Product product, ProductPromotionRequest request) {
         ProductPromotion existingPromotion = productPromotionRepository.findFirstByProductIdOrderByIdAsc(product.getId()).orElse(null);
+        if (existingPromotion != null && existingPromotion.getPromotionCampaign() != null) {
+            return;
+        }
         if (request == null) {
             if (existingPromotion != null) {
                 productPromotionRepository.delete(existingPromotion);

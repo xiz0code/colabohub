@@ -1,5 +1,6 @@
 package com.colaborapp.products.repository;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -307,6 +308,76 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("status") ProductStatus status,
             @Param("query") String query,
             Pageable pageable);
+
+    @Query("""
+            select distinct p from Product p
+            join fetch p.store s
+            left join fetch p.ownerUser owner
+            where p.tenant.id = :tenantId
+              and p.status = :status
+              and (
+                  p.createdAt >= :since
+                  or exists (
+                      select 1 from StockMovement sm
+                      where sm.product = p
+                        and sm.createdAt >= :since
+                        and sm.quantity > 0
+                  )
+              )
+            order by p.updatedAt desc, p.id desc
+            """)
+    java.util.List<Product> findRecentForBarcodeLabels(
+            @Param("tenantId") Long tenantId,
+            @Param("status") ProductStatus status,
+            @Param("since") Instant since);
+
+    @Query("""
+            select distinct p from Product p
+            join fetch p.store s
+            left join fetch p.ownerUser owner
+            where p.tenant.id = :tenantId
+              and s.market.id in :marketIds
+              and p.status = :status
+              and (
+                  p.createdAt >= :since
+                  or exists (
+                      select 1 from StockMovement sm
+                      where sm.product = p
+                        and sm.createdAt >= :since
+                        and sm.quantity > 0
+                  )
+              )
+            order by p.updatedAt desc, p.id desc
+            """)
+    java.util.List<Product> findRecentForBarcodeLabelsByMarketIds(
+            @Param("tenantId") Long tenantId,
+            @Param("marketIds") java.util.Collection<Long> marketIds,
+            @Param("status") ProductStatus status,
+            @Param("since") Instant since);
+
+    @Query("""
+            select distinct p from Product p
+            join fetch p.store s
+            left join fetch p.ownerUser owner
+            where p.tenant.id = :tenantId
+              and owner.id = :ownerUserId
+              and p.status = :status
+              and (
+                  p.createdAt >= :since
+                  or exists (
+                      select 1 from StockMovement sm
+                      where sm.product = p
+                        and sm.createdAt >= :since
+                        and sm.quantity > 0
+                  )
+              )
+            order by p.updatedAt desc, p.id desc
+            """)
+    java.util.List<Product> findRecentForBarcodeLabelsByOwnerUserId(
+            @Param("tenantId") Long tenantId,
+            @Param("ownerUserId") Long ownerUserId,
+            @Param("status") ProductStatus status,
+            @Param("since") Instant since);
 
     @Query("""
             select distinct s from Product p

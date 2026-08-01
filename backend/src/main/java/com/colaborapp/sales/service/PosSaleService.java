@@ -29,6 +29,7 @@ import com.colaborapp.pickups.repository.PickupRepository;
 import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
+import com.colaborapp.products.service.ProductAuditService;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.security.AuthenticatedUserService;
 import com.colaborapp.sales.domain.PaymentMethod;
@@ -78,6 +79,7 @@ public class PosSaleService {
     private final AccessControlService accessControlService;
     private final AuthenticatedUserService authenticatedUserService;
     private final CommissionSettingsService commissionSettingsService;
+    private final ProductAuditService productAuditService;
 
     @Transactional
     public PosSaleResponse createSale(CreatePosSaleRequest request) {
@@ -405,6 +407,7 @@ public class PosSaleService {
             movement.setReferenceType("SALE");
             movement.setReferenceId(sale.getId());
             stockMovementRepository.save(movement);
+            productAuditService.logSale(product, previousStock, item.getQuantity(), newStock, sale.getId());
         }
 
         sale.setStatus(SaleStatus.CONFIRMED);

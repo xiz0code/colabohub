@@ -12,5 +12,11 @@ public record DashboardSummaryResponse(
         BigDecimal totalNet,
         long activeProducts,
         long lowStockProducts,
+        long pendingPickups,
+        long previousDaySalesCount,
+        BigDecimal previousDayAmount,
+        BigDecimal salesChangePercentage,
+        List<DashboardTrendPointResponse> trend,
+        List<DashboardPaymentMethodResponse> paymentMethods,
         List<StoreSalesSummaryResponse> stores) {
 }

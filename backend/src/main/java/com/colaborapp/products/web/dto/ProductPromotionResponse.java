@@ -10,6 +10,7 @@ public record ProductPromotionResponse(
         Integer quantity,
         BigDecimal promotionalPrice,
         BigDecimal percentageDiscount,
+        BigDecimal minimumPurchaseAmount,
         Boolean appliesToCash,
         Boolean appliesToDebit,
         Instant endsAt) {

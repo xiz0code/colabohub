@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.colaborapp.config.bootstrap.CurrentTenantProvider;
 import com.colaborapp.markets.domain.Market;
 import com.colaborapp.markets.repository.MarketRepository;
+import com.colaborapp.pickups.repository.PickupRepository;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.products.repository.ProductRepository;
 import com.colaborapp.sales.domain.Sale;
@@ -60,6 +61,9 @@ class SalesReportServiceTest {
     private ProductRepository productRepository;
 
     @Mock
+    private PickupRepository pickupRepository;
+
+    @Mock
     private UserRepository userRepository;
 
     @Mock
@@ -81,6 +85,7 @@ class SalesReportServiceTest {
                 storeRepository,
                 marketRepository,
                 productRepository,
+                pickupRepository,
                 userRepository,
                 currentTenantProvider,
                 accessControlService,
@@ -101,6 +106,12 @@ class SalesReportServiceTest {
         lenient().when(userRepository.findAllByOrderByFullNameAsc()).thenReturn(List.of(collaborator));
         lenient().when(accessControlService.currentStoreIds()).thenReturn(List.of(1L));
         lenient().when(accessControlService.currentMarketIds()).thenReturn(List.of(1L));
+        lenient().when(pickupRepository.countDashboardPending(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.nullable(Long.class),
+                org.mockito.ArgumentMatchers.anyList())).thenReturn(0L);
     }
 
     @Test
@@ -160,6 +171,12 @@ class SalesReportServiceTest {
         when(productRepository.countByTenantIdAndOwnerUser_IdAndStatus(1L, 7L, ProductStatus.ACTIVE)).thenReturn(6L);
         when(productRepository.countByTenantIdAndOwnerUser_IdAndStatusAndStockLessThanEqual(1L, 7L, ProductStatus.ACTIVE, 5))
                 .thenReturn(2L);
+        when(pickupRepository.countDashboardPending(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq(List.of(1L)),
+                org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.anyList())).thenReturn(3L);
 
         var response = salesReportService.getDashboardSummary();
 
@@ -167,6 +184,8 @@ class SalesReportServiceTest {
         assertThat(response.totalAmount()).isEqualByComparingTo("16000.0000");
         assertThat(response.activeProducts()).isEqualTo(6L);
         assertThat(response.lowStockProducts()).isEqualTo(2L);
+        assertThat(response.pendingPickups()).isEqualTo(3L);
+        assertThat(response.trend()).hasSize(7);
         assertThat(response.stores()).extracting(store -> store.storeName()).containsExactly("Mercado 1");
     }
 

@@ -29,6 +29,10 @@ import com.colaborapp.closings.web.dto.DailyClosingStoreResponse;
 import com.colaborapp.common.web.HealthController;
 import com.colaborapp.common.exception.GlobalExceptionHandler;
 import com.colaborapp.config.SecurityConfig;
+import com.colaborapp.promotions.domain.PromotionType;
+import com.colaborapp.promotions.service.PromotionCampaignService;
+import com.colaborapp.promotions.web.PromotionCampaignController;
+import com.colaborapp.promotions.web.dto.PromotionCampaignResponse;
 import com.colaborapp.reports.service.SalesReportService;
 import com.colaborapp.reports.web.MarketReportController;
 import com.colaborapp.reports.web.SalesReportController;
@@ -38,6 +42,7 @@ import com.colaborapp.sales.domain.PaymentMethod;
 import com.colaborapp.sales.domain.SaleItemPricingType;
 import com.colaborapp.sales.domain.SaleStatus;
 import com.colaborapp.sales.service.PosSaleService;
+import com.colaborapp.sales.service.SalesCommissionRecalculationService;
 import com.colaborapp.sales.web.PosSaleController;
 import com.colaborapp.sales.web.dto.PosSaleItemResponse;
 import com.colaborapp.sales.web.dto.PosSaleResponse;
@@ -45,7 +50,12 @@ import com.colaborapp.sales.web.dto.PosSaleStoreSummaryResponse;
 import com.colaborapp.security.AccessControlService;
 import com.colaborapp.security.GoogleOAuth2UserService;
 
-@WebMvcTest({ PosSaleController.class, DailyClosingController.class, MarketReportController.class, SalesReportController.class, HealthController.class })
+@WebMvcTest(
+        controllers = { PosSaleController.class, DailyClosingController.class, MarketReportController.class, SalesReportController.class, PromotionCampaignController.class, HealthController.class },
+        properties = {
+                "spring.security.oauth2.client.registration.google.client-id=test-client",
+                "spring.security.oauth2.client.registration.google.client-secret=test-secret"
+        })
 @AutoConfigureMockMvc
 @Import({ GlobalExceptionHandler.class, SecurityConfig.class })
 class ProtectedEndpointsSecurityTest {
@@ -61,6 +71,12 @@ class ProtectedEndpointsSecurityTest {
 
     @MockBean
     private SalesReportService salesReportService;
+
+    @MockBean
+    private SalesCommissionRecalculationService salesCommissionRecalculationService;
+
+    @MockBean
+    private PromotionCampaignService promotionCampaignService;
 
     @MockBean(name = "accessControl")
     private AccessControlService accessControlService;
@@ -124,6 +140,12 @@ class ProtectedEndpointsSecurityTest {
                         new BigDecimal("30800.00"),
                         12L,
                         3L,
+                        1L,
+                        1L,
+                        new BigDecimal("12000.00"),
+                        new BigDecimal("166.67"),
+                        List.of(),
+                        List.of(),
                         List.of()));
 
         mockMvc.perform(get("/api/reports/sales/dashboard")
@@ -197,7 +219,7 @@ class ProtectedEndpointsSecurityTest {
 
     @Test
     void authenticatedUserWithValidPosAccessCanConfirmSale() throws Exception {
-        when(accessControlService.canOperatePos()).thenReturn(true);
+        when(accessControlService.canReadPosSales()).thenReturn(true);
         when(posSaleService.confirm(1L)).thenReturn(posSaleResponse());
 
         mockMvc.perform(post("/api/pos/sales/1/confirm")
@@ -207,8 +229,44 @@ class ProtectedEndpointsSecurityTest {
     }
 
     @Test
+    void storeUserCanManageOwnPromotions() throws Exception {
+        when(accessControlService.canManageOwnCatalog()).thenReturn(true);
+        when(promotionCampaignService.listPromotions(null)).thenReturn(List.of(promotionResponse()));
+        when(promotionCampaignService.createPromotion(any())).thenReturn(promotionResponse());
+
+        mockMvc.perform(get("/api/promotions")
+                        .with(user("tienda@colaborapp.cl")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/promotions")
+                        .with(user("tienda@colaborapp.cl"))
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "ownerUserId": 20,
+                                  "name": "2 x 1500",
+                                  "type": "QUANTITY_BLOCK",
+                                  "quantity": 2,
+                                  "promotionalPrice": 1500,
+                                  "active": true
+                                }
+                                """))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void userWithoutCatalogPermissionCannotManagePromotions() throws Exception {
+        when(accessControlService.canManageOwnCatalog()).thenReturn(false);
+
+        mockMvc.perform(get("/api/promotions")
+                        .with(user("seller@colaborapp.cl")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void storeUserCannotConfirmSale() throws Exception {
-        when(accessControlService.canOperatePos()).thenReturn(false);
+        when(accessControlService.canReadPosSales()).thenReturn(false);
 
         mockMvc.perform(post("/api/pos/sales/1/confirm")
                         .with(user("colaborador@colaborapp.cl"))
@@ -236,6 +294,30 @@ class ProtectedEndpointsSecurityTest {
                         new BigDecimal("1500.0000"),
                         new BigDecimal("18500.0000"),
                         2L)));
+    }
+
+    private PromotionCampaignResponse promotionResponse() {
+        return new PromotionCampaignResponse(
+                1L,
+                10L,
+                "Stock principal",
+                20L,
+                "Tienda Ana",
+                "2 x 1500",
+                PromotionType.QUANTITY_BLOCK,
+                2,
+                new BigDecimal("1500.00"),
+                null,
+                null,
+                false,
+                false,
+                false,
+                false,
+                true,
+                null,
+                null,
+                0L,
+                List.of());
     }
 
     private PosSaleResponse posSaleResponse() {

@@ -18,6 +18,7 @@ import com.colaborapp.products.domain.Product;
 import com.colaborapp.products.domain.ProductStatus;
 import com.colaborapp.promotions.domain.ProductPromotion;
 import com.colaborapp.promotions.domain.ProductPromotionGroup;
+import com.colaborapp.promotions.domain.PromotionCampaign;
 import com.colaborapp.promotions.domain.PromotionType;
 import com.colaborapp.promotions.repository.ProductPromotionRepository;
 import com.colaborapp.sales.domain.PaymentMethod;
@@ -285,6 +286,112 @@ class PosPricingServiceTest {
     }
 
     @Test
+    void shouldApplyQuantityPromotionAcrossCampaignProductsWithDifferentPrices() {
+        PromotionCampaign campaign = new PromotionCampaign();
+        campaign.setId(110L);
+        campaign.setName("2 x 1500");
+
+        Product socks = product(615L, storeAna, collaboratorAna, "Calceitin", new BigDecimal("1500.00"));
+        Product photocard = product(616L, storeAna, collaboratorAna, "Photocard BTS", new BigDecimal("1000.00"));
+        photocard.setPromotionGroup(promotionGroup(72L, "PC", storeAna));
+        ProductPromotion promotionA = quantityCampaignPromotion(socks, campaign);
+        ProductPromotion promotionB = quantityCampaignPromotion(photocard, campaign);
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotionA, promotionB));
+
+        SaleItem itemA = saleItem(socks, 1);
+        SaleItem itemB = saleItem(photocard, 3);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(itemA, itemB),
+                PaymentMethod.CASH,
+                null);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("3000.00");
+        assertThat(result.totalDiscountAmount()).isEqualByComparingTo("1500.00");
+        assertThat(itemA.getAppliedPromotionName()).isEqualTo("2 x 1500");
+        assertThat(itemB.getAppliedPromotionName()).isEqualTo("2 x 1500");
+    }
+
+    @Test
+    void shouldApplyHighestPriceBundleAcrossCampaignProducts() {
+        PromotionCampaign campaign = new PromotionCampaign();
+        campaign.setId(120L);
+        campaign.setName("3 por precio mayor");
+
+        Product photocard = product(621L, storeAna, collaboratorAna, "Photocard", new BigDecimal("1000.00"));
+        Product sticker = product(622L, storeAna, collaboratorAna, "Sticker", new BigDecimal("700.00"));
+        Product poster = product(623L, storeAna, collaboratorAna, "Poster", new BigDecimal("1500.00"));
+
+        ProductPromotion promotionA = highestPricePromotion(photocard, campaign);
+        ProductPromotion promotionB = highestPricePromotion(sticker, campaign);
+        ProductPromotion promotionC = highestPricePromotion(poster, campaign);
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotionA, promotionB, promotionC));
+
+        SaleItem itemA = saleItem(photocard, 1);
+        SaleItem itemB = saleItem(sticker, 1);
+        SaleItem itemC = saleItem(poster, 1);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(itemA, itemB, itemC),
+                PaymentMethod.CASH,
+                null);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("1500.00");
+        assertThat(result.totalDiscountAmount()).isEqualByComparingTo("1700.00");
+        assertThat(itemA.getAppliedPromotionName()).isEqualTo("3 por precio mayor");
+        assertThat(itemB.getAppliedPromotionName()).isEqualTo("3 por precio mayor");
+        assertThat(itemC.getAppliedPromotionName()).isEqualTo("3 por precio mayor");
+    }
+
+    @Test
+    void shouldApplyMinimumAmountPercentagePromotionAcrossCampaignProducts() {
+        PromotionCampaign campaign = new PromotionCampaign();
+        campaign.setId(130L);
+        campaign.setName("15% sobre compras mayores a 20000");
+
+        Product album = product(631L, storeAna, collaboratorAna, "Album", new BigDecimal("15000.00"));
+        Product photobook = product(632L, storeAna, collaboratorAna, "Photobook", new BigDecimal("10000.00"));
+        ProductPromotion promotionA = minimumAmountPromotion(album, campaign);
+        ProductPromotion promotionB = minimumAmountPromotion(photobook, campaign);
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotionA, promotionB));
+
+        SaleItem itemA = saleItem(album, 1);
+        SaleItem itemB = saleItem(photobook, 1);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(itemA, itemB),
+                PaymentMethod.CASH,
+                null);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("21250.00");
+        assertThat(result.totalDiscountAmount()).isEqualByComparingTo("3750.00");
+        assertThat(itemA.getAppliedPromotionName()).isEqualTo("15% sobre compras mayores a 20000");
+        assertThat(itemB.getAppliedPromotionName()).isEqualTo("15% sobre compras mayores a 20000");
+    }
+
+    @Test
+    void shouldNotApplyMinimumAmountPercentagePromotionWhenSubtotalIsLower() {
+        PromotionCampaign campaign = new PromotionCampaign();
+        campaign.setId(131L);
+        campaign.setName("15% sobre compras mayores a 20000");
+
+        Product album = product(633L, storeAna, collaboratorAna, "Album mini", new BigDecimal("15000.00"));
+        ProductPromotion promotion = minimumAmountPromotion(album, campaign);
+        when(productPromotionRepository.findActiveByProductIds(any(), any())).thenReturn(List.of(promotion));
+
+        SaleItem item = saleItem(album, 1);
+
+        PosPricingService.RecalculationResult result = posPricingService.calculateSalePricing(
+                List.of(item),
+                PaymentMethod.CASH,
+                null);
+
+        assertThat(result.totalAmount()).isEqualByComparingTo("15000.00");
+        assertThat(result.totalDiscountAmount()).isEqualByComparingTo("0.00");
+        assertThat(item.getAppliedPromotionName()).isNull();
+    }
+
+    @Test
     void shouldDisplayGroupedQuantityPromotionByLineWhenLineCompletesBlocks() {
         ProductPromotionGroup group = promotionGroup(71L, "PC", storeAna);
         Product photocardA = product(611L, storeAna, collaboratorAna, "Photocard BTS", new BigDecimal("1000.00"));
@@ -310,8 +417,8 @@ class PosPricingServiceTest {
                 null);
 
         assertThat(result.totalAmount()).isEqualByComparingTo("4000.00");
-        assertThat(itemA.getSubtotal()).isEqualByComparingTo("2500.00");
-        assertThat(itemB.getSubtotal()).isEqualByComparingTo("1500.00");
+        assertThat(itemA.getSubtotal()).isEqualByComparingTo("2400.00");
+        assertThat(itemB.getSubtotal()).isEqualByComparingTo("1600.00");
     }
 
     @Test
@@ -380,6 +487,44 @@ class PosPricingServiceTest {
         group.setStore(store);
         group.setName(name);
         return group;
+    }
+
+    private ProductPromotion highestPricePromotion(Product product, PromotionCampaign campaign) {
+        ProductPromotion promotion = new ProductPromotion();
+        promotion.setId(product.getId() + 1000);
+        promotion.setProduct(product);
+        promotion.setPromotionCampaign(campaign);
+        promotion.setType(PromotionType.HIGHEST_PRICE_BUNDLE);
+        promotion.setBlockQuantity(3);
+        promotion.setBlockPrice(BigDecimal.ZERO);
+        promotion.setName("3 por precio mayor");
+        return promotion;
+    }
+
+    private ProductPromotion quantityCampaignPromotion(Product product, PromotionCampaign campaign) {
+        ProductPromotion promotion = new ProductPromotion();
+        promotion.setId(product.getId() + 1500);
+        promotion.setProduct(product);
+        promotion.setPromotionCampaign(campaign);
+        promotion.setType(PromotionType.QUANTITY_BLOCK);
+        promotion.setBlockQuantity(2);
+        promotion.setBlockPrice(new BigDecimal("1500.00"));
+        promotion.setName("2 x 1500");
+        return promotion;
+    }
+
+    private ProductPromotion minimumAmountPromotion(Product product, PromotionCampaign campaign) {
+        ProductPromotion promotion = new ProductPromotion();
+        promotion.setId(product.getId() + 2000);
+        promotion.setProduct(product);
+        promotion.setPromotionCampaign(campaign);
+        promotion.setType(PromotionType.MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT);
+        promotion.setPercentageDiscount(new BigDecimal("15.00"));
+        promotion.setMinimumPurchaseAmount(new BigDecimal("20000.00"));
+        promotion.setBlockQuantity(1);
+        promotion.setBlockPrice(BigDecimal.ZERO);
+        promotion.setName("15% sobre compras mayores a 20000");
+        return promotion;
     }
 
     private SaleItem saleItem(Product product, int quantity) {

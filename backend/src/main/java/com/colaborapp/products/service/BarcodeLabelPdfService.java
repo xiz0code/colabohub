@@ -109,10 +109,17 @@ public class BarcodeLabelPdfService {
         double bottom = yTop - height;
         double inset = 6d;
         pdf.roundedRect(x, bottom, width, height, 10d, "1 1 1", "0.82 0.78 0.9");
-        pdf.text(x + inset, yTop - 10.5d, 6.6d, truncate(product.name(), 24), true);
-        pdf.text(x + inset, yTop - 19d, 5.8d, formatPrice(product.salePrice()), true);
+        List<String> nameLines = wrap(product.name(), 34, 2);
+        double nameSize = product.name().length() > 44 ? 4.7d : 5.4d;
+        double nameY = yTop - 9.2d;
+        for (String line : nameLines) {
+            pdf.text(x + inset, nameY, nameSize, line, true);
+            nameY -= 5.7d;
+        }
+        double priceY = nameLines.size() > 1 ? yTop - 22.2d : yTop - 17.8d;
+        pdf.text(x + inset, priceY, 5.8d, formatPrice(product.salePrice()), true);
         if (includeCollaboratorName && product.ownerFullName() != null && !product.ownerFullName().isBlank()) {
-            pdf.text(x + inset, yTop - 27.5d, 5.1d, truncate(product.ownerFullName(), 20), false);
+            pdf.text(x + inset, yTop - 29.2d, 4.8d, truncate(product.ownerFullName(), 24), false);
         }
 
         drawCode128(pdf, product.barcode(), x + inset, bottom + 12d, width - (inset * 2), 13d);
@@ -223,6 +230,40 @@ public class BarcodeLabelPdfService {
             return value;
         }
         return value.substring(0, maxLength - 1) + "...";
+    }
+
+    private List<String> wrap(String value, int maxLength, int maxLines) {
+        String text = value == null ? "" : value.trim().replaceAll("\\s+", " ");
+        if (text.length() <= maxLength) {
+            return List.of(text);
+        }
+
+        List<String> lines = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String word : text.split(" ")) {
+            if (current.isEmpty()) {
+                current.append(word);
+            } else if (current.length() + 1 + word.length() <= maxLength) {
+                current.append(' ').append(word);
+            } else {
+                lines.add(current.toString());
+                current.setLength(0);
+                current.append(word);
+            }
+
+            if (lines.size() == maxLines) {
+                break;
+            }
+        }
+        if (!current.isEmpty() && lines.size() < maxLines) {
+            lines.add(current.toString());
+        }
+
+        if (lines.size() == maxLines && String.join(" ", lines).length() < text.length()) {
+            int lastIndex = lines.size() - 1;
+            lines.set(lastIndex, truncate(lines.get(lastIndex), Math.max(4, maxLength - 1)));
+        }
+        return lines.isEmpty() ? List.of("") : lines;
     }
 
     private String formatPrice(java.math.BigDecimal salePrice) {

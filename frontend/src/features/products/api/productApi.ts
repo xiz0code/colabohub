@@ -40,10 +40,30 @@ export type ProductPromotion =
       endsAt?: string | null;
     }
   | {
+      type: "HIGHEST_PRICE_BUNDLE";
+      quantity: number;
+      promotionalPrice: null;
+      percentageDiscount: null;
+      appliesToCash?: boolean | null;
+      appliesToDebit?: boolean | null;
+      endsAt?: string | null;
+    }
+  | {
       type: "PERCENTAGE_DISCOUNT";
       quantity: null;
       promotionalPrice: null;
       percentageDiscount: number;
+      minimumPurchaseAmount?: number | null;
+      appliesToCash?: boolean | null;
+      appliesToDebit?: boolean | null;
+      endsAt?: string | null;
+    }
+  | {
+      type: "MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT";
+      quantity: null;
+      promotionalPrice: null;
+      percentageDiscount: number;
+      minimumPurchaseAmount: number;
       appliesToCash?: boolean | null;
       appliesToDebit?: boolean | null;
       endsAt?: string | null;
@@ -53,6 +73,7 @@ export type ProductPromotion =
       quantity: null;
       promotionalPrice: null;
       percentageDiscount: number;
+      minimumPurchaseAmount?: number | null;
       appliesToCash: boolean;
       appliesToDebit: boolean;
       endsAt?: string | null;
@@ -65,6 +86,11 @@ export type ProductAuditLog = {
   newValue: string | null;
   createdAt: string;
   createdBy: string;
+};
+
+export type RecentBarcodeLabelProduct = {
+  product: Product;
+  labelQuantity: number;
 };
 
 export type ListProductsParams = {
@@ -218,6 +244,16 @@ export function deletePromotionGroup(groupId: number) {
 
 export function getProductAudit(productId: number) {
   return apiFetch<ProductAuditLog[]>(`/api/products/${productId}/audit`);
+}
+
+export function listRecentBarcodeLabelProducts(hours = 24) {
+  return apiFetch<Array<{ product: RawProduct; labelQuantity: number }>>(`/api/products/barcode-labels/recent?hours=${hours}`)
+    .then((items) =>
+      items.map((item) => ({
+        product: normalizeProduct(item.product),
+        labelQuantity: item.labelQuantity,
+      })),
+    );
 }
 
 export function printBarcodeLabels(input: BarcodeLabelInput) {

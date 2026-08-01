@@ -36,6 +36,18 @@ public class ProductAuditService {
         productAuditLogRepository.save(log);
     }
 
+    @Transactional
+    public void logStockIncrease(Product product, int previousStock, int quantityAdded, int newStock) {
+        logStockEvent(product, "Stock agregado", previousStock, quantityAdded, newStock);
+    }
+
+    @Transactional
+    public void logSale(Product product, int previousStock, int quantitySold, int newStock, Long saleId) {
+        String previous = "Stock previo: " + previousStock;
+        String current = "Vendido: " + quantitySold + " | Stock final: " + newStock + " | Venta: " + saleId;
+        saveLog(product, "Vendido", previous, current);
+    }
+
     @Transactional(readOnly = true)
     public List<ProductAuditLogResponse> getAuditTrail(Long productId) {
         return productAuditLogRepository.findByProductIdOrderByCreatedAtDesc(productId).stream()
@@ -51,5 +63,21 @@ public class ProductAuditService {
 
     private String stringify(Object value) {
         return value == null ? null : String.valueOf(value);
+    }
+
+    private void logStockEvent(Product product, String fieldName, int previousStock, int quantityDelta, int newStock) {
+        String previous = "Stock previo: " + previousStock;
+        String current = "Subio: " + quantityDelta + " | Stock final: " + newStock;
+        saveLog(product, fieldName, previous, current);
+    }
+
+    private void saveLog(Product product, String fieldName, String previousValue, String newValue) {
+        ProductAuditLog log = new ProductAuditLog();
+        log.setTenant(product.getTenant());
+        log.setProduct(product);
+        log.setFieldName(fieldName);
+        log.setPreviousValue(previousValue);
+        log.setNewValue(newValue);
+        productAuditLogRepository.save(log);
     }
 }

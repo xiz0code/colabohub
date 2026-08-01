@@ -39,6 +39,7 @@ import com.colaborapp.products.web.dto.ProductResponse;
 import com.colaborapp.products.web.dto.ProductStockIncreaseRequest;
 import com.colaborapp.products.web.dto.ProductStatusUpdateRequest;
 import com.colaborapp.products.web.dto.ProductUpdateRequest;
+import com.colaborapp.products.web.dto.RecentBarcodeLabelProductResponse;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -154,5 +155,12 @@ public class ProductController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=barcode-labels.pdf")
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(pdf);
+    }
+
+    @GetMapping("/barcode-labels/recent")
+    @PreAuthorize("@accessControl.canManageOwnCatalog()")
+    public List<RecentBarcodeLabelProductResponse> recentBarcodeLabelProducts(
+            @RequestParam(defaultValue = "24") Integer hours) {
+        return productService.getRecentProductsForBarcodeLabels(hours);
     }
 }

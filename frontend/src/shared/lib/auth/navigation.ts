@@ -15,6 +15,7 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
     { to: "/closings", label: "Cierres" },
     { to: "/sales", label: "Ventas" },
     { to: "/pickups", label: "Retiros" },
+    { to: "/promotions", label: "Promociones" },
     { to: "/commissions", label: "Configuracion" },
   ],
   ADMIN_MARKET: [
@@ -23,6 +24,7 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
     { to: "/vendedores", label: "Vendedores" },
     { to: "/sales", label: "Ventas" },
     { to: "/pickups", label: "Retiros" },
+    { to: "/promotions", label: "Promociones" },
     { to: "/products", label: "Stock" },
     { to: "/reports/collaborators", label: "Reportes" },
     { to: "/closings", label: "Cierres" },
@@ -37,6 +39,7 @@ const navItemsByRole: Record<AppRole, AppNavItem[]> = {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/sales/today", label: "Mis ventas" },
     { to: "/pickups", label: "Retiros" },
+    { to: "/promotions", label: "Promociones" },
     { to: "/products", label: "Mi stock" },
   ],
   COLLABORATOR: [

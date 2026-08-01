@@ -4,9 +4,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 import com.colaborapp.common.domain.BaseEntity;
-import com.colaborapp.products.domain.Product;
 import com.colaborapp.stores.domain.Store;
 import com.colaborapp.tenant.domain.Tenant;
+import com.colaborapp.users.domain.User;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -21,11 +21,11 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "product_promotions")
+@Table(name = "promotion_campaigns")
 @Getter
 @Setter
 @NoArgsConstructor
-public class ProductPromotion extends BaseEntity {
+public class PromotionCampaign extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "tenant_id", nullable = false)
@@ -36,24 +36,20 @@ public class ProductPromotion extends BaseEntity {
     private Store store;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "promotion_campaign_id")
-    private PromotionCampaign promotionCampaign;
+    @JoinColumn(name = "owner_user_id", nullable = false)
+    private User ownerUser;
 
     @Column(nullable = false, length = 180)
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
+    @Column(nullable = false, length = 40)
     private PromotionType type;
 
-    @Column(nullable = false)
+    @Column
     private Integer blockQuantity;
 
-    @Column(nullable = false, precision = 19, scale = 4)
+    @Column(precision = 19, scale = 4)
     private BigDecimal blockPrice;
 
     @Column(precision = 5, scale = 2)

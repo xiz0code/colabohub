@@ -60,6 +60,9 @@ public class PosPricingService {
                         .stream()
                         .collect(java.util.stream.Collectors.groupingBy(pp -> pp.getProduct().getId()));
         Map<Long, ProductPromotion> quantityPromotionByGroupId = resolveQuantityPromotionsByGroup(items, promotionsByProductId);
+        Map<Long, ProductPromotion> quantityPromotionByCampaignId = resolveQuantityPromotionsByCampaign(items, promotionsByProductId);
+        Map<Long, ProductPromotion> highestPricePromotionByCampaignId = resolveHighestPricePromotionsByCampaign(items, promotionsByProductId);
+        Map<Long, ProductPromotion> minimumAmountPromotionByCampaignId = resolveMinimumAmountPromotionsByCampaign(items, promotionsByProductId);
 
         List<SaleItem> recalculatedItems = new ArrayList<>(items.size());
         for (SaleItem item : items) {
@@ -71,10 +74,29 @@ public class PosPricingService {
                         .filter(promotion -> promotion.getType() != PromotionType.QUANTITY_BLOCK)
                         .toList();
             }
+            if (!quantityPromotionByCampaignId.isEmpty()) {
+                itemPromotions = itemPromotions.stream()
+                        .filter(promotion -> promotion.getType() != PromotionType.QUANTITY_BLOCK
+                                || promotion.getPromotionCampaign() == null)
+                        .toList();
+            }
+            if (!highestPricePromotionByCampaignId.isEmpty()) {
+                itemPromotions = itemPromotions.stream()
+                        .filter(promotion -> promotion.getType() != PromotionType.HIGHEST_PRICE_BUNDLE)
+                        .toList();
+            }
+            if (!minimumAmountPromotionByCampaignId.isEmpty()) {
+                itemPromotions = itemPromotions.stream()
+                        .filter(promotion -> promotion.getType() != PromotionType.MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT)
+                        .toList();
+            }
             calculateItemPricing(item, itemPromotions, paymentMethod);
             recalculatedItems.add(item);
         }
         applyGroupedQuantityPromotions(recalculatedItems, quantityPromotionByGroupId);
+        applyCampaignQuantityPromotions(recalculatedItems, quantityPromotionByCampaignId, promotionsByProductId);
+        applyHighestPricePromotions(recalculatedItems, highestPricePromotionByCampaignId, promotionsByProductId);
+        applyMinimumAmountPromotions(recalculatedItems, minimumAmountPromotionByCampaignId, promotionsByProductId);
 
         List<SaleStoreSummary> summaries = calculateStoreSummaries(recalculatedItems, paymentMethod, ufValue);
         BigDecimal subtotalAmount = recalculatedItems.stream()
@@ -119,6 +141,7 @@ public class PosPricingService {
             Long groupId = item.getProduct().getPromotionGroup().getId();
             promotionsByProductId.getOrDefault(productId, List.of()).stream()
                     .filter(promotion -> promotion.getType() == PromotionType.QUANTITY_BLOCK)
+                    .filter(promotion -> promotion.getPromotionCampaign() == null)
                     .forEach(promotion -> promotionsByGroupId.computeIfAbsent(groupId, ignored -> new ArrayList<>()).add(promotion));
         }
 
@@ -128,6 +151,57 @@ public class PosPricingService {
                 .max(Comparator.comparing(ProductPromotion::getBlockQuantity)
                         .thenComparing(ProductPromotion::getBlockPrice, Comparator.reverseOrder()))
                 .ifPresent(promotion -> result.put(groupId, promotion)));
+        return result;
+    }
+
+    private Map<Long, ProductPromotion> resolveQuantityPromotionsByCampaign(
+            List<SaleItem> items,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        Map<Long, ProductPromotion> result = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.isManualEntry() || item.getProduct() == null) {
+                continue;
+            }
+            Long productId = item.getProduct().getId();
+            promotionsByProductId.getOrDefault(productId, List.of()).stream()
+                    .filter(promotion -> promotion.getType() == PromotionType.QUANTITY_BLOCK)
+                    .filter(promotion -> promotion.getPromotionCampaign() != null)
+                    .forEach(promotion -> result.putIfAbsent(promotion.getPromotionCampaign().getId(), promotion));
+        }
+        return result;
+    }
+
+    private Map<Long, ProductPromotion> resolveMinimumAmountPromotionsByCampaign(
+            List<SaleItem> items,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        Map<Long, ProductPromotion> result = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.isManualEntry() || item.getProduct() == null) {
+                continue;
+            }
+            Long productId = item.getProduct().getId();
+            promotionsByProductId.getOrDefault(productId, List.of()).stream()
+                    .filter(promotion -> promotion.getType() == PromotionType.MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT)
+                    .filter(promotion -> promotion.getPromotionCampaign() != null)
+                    .forEach(promotion -> result.putIfAbsent(promotion.getPromotionCampaign().getId(), promotion));
+        }
+        return result;
+    }
+
+    private Map<Long, ProductPromotion> resolveHighestPricePromotionsByCampaign(
+            List<SaleItem> items,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        Map<Long, ProductPromotion> result = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.isManualEntry() || item.getProduct() == null) {
+                continue;
+            }
+            Long productId = item.getProduct().getId();
+            promotionsByProductId.getOrDefault(productId, List.of()).stream()
+                    .filter(promotion -> promotion.getType() == PromotionType.HIGHEST_PRICE_BUNDLE)
+                    .filter(promotion -> promotion.getPromotionCampaign() != null)
+                    .forEach(promotion -> result.putIfAbsent(promotion.getPromotionCampaign().getId(), promotion));
+        }
         return result;
     }
 
@@ -159,36 +233,241 @@ public class PosPricingService {
             return;
         }
 
-        BigDecimal unitPrice = eligibleItems.getFirst().getBaseUnitPrice();
-        boolean sameUnitPrice = eligibleItems.stream().allMatch(item -> item.getBaseUnitPrice().compareTo(unitPrice) == 0);
-        if (!sameUnitPrice) {
+        applyFixedBundlePromotion(
+                eligibleItems,
+                promotion,
+                promotion.getName() + " (grupo " + eligibleItems.getFirst().getProduct().getPromotionGroup().getName() + ")");
+    }
+
+    private void applyCampaignQuantityPromotions(
+            List<SaleItem> items,
+            Map<Long, ProductPromotion> promotionsByCampaignId,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        if (promotionsByCampaignId.isEmpty()) {
             return;
         }
 
+        Map<Long, List<SaleItem>> itemsByCampaign = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.getProduct() == null
+                    || item.getBaseUnitPrice() == null
+                    || (item.getPromotionDiscountAmount() != null && item.getPromotionDiscountAmount().compareTo(ZERO) > 0)) {
+                continue;
+            }
+            Long campaignId = promotionsByProductId.getOrDefault(item.getProduct().getId(), List.of()).stream()
+                    .filter(candidate -> candidate.getType() == PromotionType.QUANTITY_BLOCK)
+                    .map(ProductPromotion::getPromotionCampaign)
+                    .filter(Objects::nonNull)
+                    .map(campaign -> campaign.getId())
+                    .filter(promotionsByCampaignId::containsKey)
+                    .findFirst()
+                    .orElse(null);
+            if (campaignId != null) {
+                itemsByCampaign.computeIfAbsent(campaignId, ignored -> new ArrayList<>()).add(item);
+            }
+        }
+
+        for (Map.Entry<Long, List<SaleItem>> entry : itemsByCampaign.entrySet()) {
+            ProductPromotion promotion = promotionsByCampaignId.get(entry.getKey());
+            if (promotion == null) {
+                continue;
+            }
+            applyFixedBundlePromotion(entry.getValue(), promotion, promotion.getName());
+        }
+    }
+
+    private void applyFixedBundlePromotion(List<SaleItem> eligibleItems, ProductPromotion promotion, String promotionName) {
         int blockQuantity = promotion.getBlockQuantity();
-        int totalQuantity = eligibleItems.stream().mapToInt(SaleItem::getQuantity).sum();
-        if (blockQuantity <= 0 || totalQuantity < blockQuantity) {
+        if (blockQuantity <= 0 || promotion.getBlockPrice() == null) {
             return;
         }
 
-        BigDecimal baseSubtotal = unitPrice.multiply(BigDecimal.valueOf(totalQuantity));
-        BigDecimal promotionalSubtotal = calculateGroupedPromotionalSubtotal(eligibleItems, promotion, unitPrice);
+        int totalQuantity = eligibleItems.stream().mapToInt(SaleItem::getQuantity).sum();
+        if (totalQuantity < blockQuantity) {
+            return;
+        }
+
+        List<BigDecimal> unitPrices = new ArrayList<>();
+        for (SaleItem item : eligibleItems) {
+            for (int index = 0; index < item.getQuantity(); index++) {
+                unitPrices.add(scale(item.getBaseUnitPrice()));
+            }
+        }
+        unitPrices.sort(Comparator.reverseOrder());
+
+        int fullBlocks = unitPrices.size() / blockQuantity;
+        int regularUnits = unitPrices.size() % blockQuantity;
+        BigDecimal baseSubtotal = unitPrices.stream().reduce(ZERO, BigDecimal::add);
+        BigDecimal regularSubtotal = ZERO;
+        if (regularUnits > 0) {
+            regularSubtotal = unitPrices.subList(unitPrices.size() - regularUnits, unitPrices.size()).stream()
+                    .reduce(ZERO, BigDecimal::add);
+        }
+        BigDecimal promotionalSubtotal = scale(scale(promotion.getBlockPrice()).multiply(BigDecimal.valueOf(fullBlocks)).add(regularSubtotal));
         BigDecimal totalDiscount = scale(baseSubtotal.subtract(promotionalSubtotal));
         if (totalDiscount.compareTo(ZERO) <= 0) {
             return;
         }
 
-        Map<SaleItem, BigDecimal> subtotalByItem = distributeGroupedPromotionalSubtotal(eligibleItems, promotion, unitPrice);
-        for (SaleItem item : eligibleItems) {
-            BigDecimal lineSubtotal = subtotalByItem.getOrDefault(item, scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()))));
+        BigDecimal undistributedDiscount = totalDiscount;
+        for (int index = 0; index < eligibleItems.size(); index++) {
+            SaleItem item = eligibleItems.get(index);
             BigDecimal lineBaseSubtotal = scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
-
+            BigDecimal lineDiscount = index == eligibleItems.size() - 1
+                    ? undistributedDiscount
+                    : scale(lineBaseSubtotal.divide(baseSubtotal, 8, HALF_UP).multiply(totalDiscount));
+            undistributedDiscount = undistributedDiscount.subtract(lineDiscount);
             item.setLineBaseSubtotal(lineBaseSubtotal);
-            item.setPromotionDiscountAmount(scale(lineBaseSubtotal.subtract(lineSubtotal)));
-            item.setSubtotal(scale(lineSubtotal));
+            item.setPromotionDiscountAmount(lineDiscount);
+            item.setSubtotal(scale(lineBaseSubtotal.subtract(lineDiscount)));
             item.setPricingType(SaleItemPricingType.PROMOTION);
             item.setAppliedPromotionId(promotion.getId());
-            item.setAppliedPromotionName(promotion.getName() + " (grupo " + item.getProduct().getPromotionGroup().getName() + ")");
+            item.setAppliedPromotionName(promotionName);
+        }
+    }
+
+    private void applyHighestPricePromotions(
+            List<SaleItem> items,
+            Map<Long, ProductPromotion> promotionsByCampaignId,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        if (promotionsByCampaignId.isEmpty()) {
+            return;
+        }
+
+        Map<Long, List<SaleItem>> itemsByCampaign = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.getProduct() == null
+                    || item.getBaseUnitPrice() == null
+                    || (item.getPromotionDiscountAmount() != null && item.getPromotionDiscountAmount().compareTo(ZERO) > 0)) {
+                continue;
+            }
+            Long campaignId = promotionsByProductId.getOrDefault(item.getProduct().getId(), List.of()).stream()
+                    .filter(candidate -> candidate.getType() == PromotionType.HIGHEST_PRICE_BUNDLE)
+                    .map(ProductPromotion::getPromotionCampaign)
+                    .filter(Objects::nonNull)
+                    .map(campaign -> campaign.getId())
+                    .filter(promotionsByCampaignId::containsKey)
+                    .findFirst()
+                    .orElse(null);
+            if (campaignId != null) {
+                itemsByCampaign.computeIfAbsent(campaignId, ignored -> new ArrayList<>()).add(item);
+            }
+        }
+
+        for (Map.Entry<Long, List<SaleItem>> entry : itemsByCampaign.entrySet()) {
+            ProductPromotion promotion = promotionsByCampaignId.get(entry.getKey());
+            if (promotion == null) {
+                continue;
+            }
+            applyHighestPricePromotion(entry.getValue(), promotion);
+        }
+    }
+
+    private void applyHighestPricePromotion(List<SaleItem> campaignItems, ProductPromotion promotion) {
+        int blockQuantity = promotion.getBlockQuantity();
+        int totalQuantity = campaignItems.stream().mapToInt(SaleItem::getQuantity).sum();
+        if (blockQuantity <= 0 || totalQuantity < blockQuantity) {
+            return;
+        }
+
+        List<BigDecimal> unitPrices = new ArrayList<>();
+        for (SaleItem item : campaignItems) {
+            for (int i = 0; i < item.getQuantity(); i++) {
+                unitPrices.add(scale(item.getBaseUnitPrice()));
+            }
+        }
+        unitPrices.sort(Comparator.reverseOrder());
+
+        BigDecimal baseSubtotal = unitPrices.stream().reduce(ZERO, BigDecimal::add);
+        BigDecimal promotionalSubtotal = ZERO;
+        for (int index = 0; index < unitPrices.size(); index += blockQuantity) {
+            List<BigDecimal> block = unitPrices.subList(index, Math.min(index + blockQuantity, unitPrices.size()));
+            if (block.size() == blockQuantity) {
+                promotionalSubtotal = promotionalSubtotal.add(block.getFirst());
+            } else {
+                promotionalSubtotal = promotionalSubtotal.add(block.stream().reduce(ZERO, BigDecimal::add));
+            }
+        }
+        BigDecimal totalDiscount = scale(baseSubtotal.subtract(promotionalSubtotal));
+        if (totalDiscount.compareTo(ZERO) <= 0) {
+            return;
+        }
+
+        BigDecimal undistributedDiscount = totalDiscount;
+        for (int index = 0; index < campaignItems.size(); index++) {
+            SaleItem item = campaignItems.get(index);
+            BigDecimal lineBaseSubtotal = scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            BigDecimal lineDiscount = index == campaignItems.size() - 1
+                    ? undistributedDiscount
+                    : scale(lineBaseSubtotal.divide(baseSubtotal, 8, HALF_UP).multiply(totalDiscount));
+            undistributedDiscount = undistributedDiscount.subtract(lineDiscount);
+            item.setLineBaseSubtotal(lineBaseSubtotal);
+            item.setPromotionDiscountAmount(lineDiscount);
+            item.setSubtotal(scale(lineBaseSubtotal.subtract(lineDiscount)));
+            item.setPricingType(SaleItemPricingType.PROMOTION);
+            item.setAppliedPromotionId(promotion.getId());
+            item.setAppliedPromotionName(promotion.getName());
+        }
+    }
+
+    private void applyMinimumAmountPromotions(
+            List<SaleItem> items,
+            Map<Long, ProductPromotion> promotionsByCampaignId,
+            Map<Long, List<ProductPromotion>> promotionsByProductId) {
+        if (promotionsByCampaignId.isEmpty()) {
+            return;
+        }
+
+        Map<Long, List<SaleItem>> itemsByCampaign = new HashMap<>();
+        for (SaleItem item : items) {
+            if (item.getProduct() == null
+                    || item.getBaseUnitPrice() == null
+                    || (item.getPromotionDiscountAmount() != null && item.getPromotionDiscountAmount().compareTo(ZERO) > 0)) {
+                continue;
+            }
+            Long campaignId = promotionsByProductId.getOrDefault(item.getProduct().getId(), List.of()).stream()
+                    .filter(candidate -> candidate.getType() == PromotionType.MIN_PURCHASE_AMOUNT_PERCENTAGE_DISCOUNT)
+                    .map(ProductPromotion::getPromotionCampaign)
+                    .filter(Objects::nonNull)
+                    .map(campaign -> campaign.getId())
+                    .filter(promotionsByCampaignId::containsKey)
+                    .findFirst()
+                    .orElse(null);
+            if (campaignId != null) {
+                itemsByCampaign.computeIfAbsent(campaignId, ignored -> new ArrayList<>()).add(item);
+            }
+        }
+
+        for (Map.Entry<Long, List<SaleItem>> entry : itemsByCampaign.entrySet()) {
+            ProductPromotion promotion = promotionsByCampaignId.get(entry.getKey());
+            if (promotion == null) {
+                continue;
+            }
+            applyMinimumAmountPromotion(entry.getValue(), promotion);
+        }
+    }
+
+    private void applyMinimumAmountPromotion(List<SaleItem> campaignItems, ProductPromotion promotion) {
+        if (promotion.getPercentageDiscount() == null || promotion.getMinimumPurchaseAmount() == null) {
+            return;
+        }
+        BigDecimal eligibleSubtotal = campaignItems.stream()
+                .map(item -> scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()))))
+                .reduce(ZERO, BigDecimal::add);
+        if (eligibleSubtotal.compareTo(scale(promotion.getMinimumPurchaseAmount())) < 0) {
+            return;
+        }
+
+        BigDecimal discountFactor = promotion.getPercentageDiscount().divide(new BigDecimal("100"), 4, HALF_UP);
+        for (SaleItem item : campaignItems) {
+            BigDecimal lineBaseSubtotal = scale(item.getBaseUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            BigDecimal lineDiscount = scale(lineBaseSubtotal.multiply(discountFactor));
+            item.setLineBaseSubtotal(lineBaseSubtotal);
+            item.setPromotionDiscountAmount(lineDiscount);
+            item.setSubtotal(scale(lineBaseSubtotal.subtract(lineDiscount)));
+            item.setPricingType(SaleItemPricingType.PROMOTION);
+            item.setAppliedPromotionId(promotion.getId());
+            item.setAppliedPromotionName(promotion.getName());
         }
     }
 
@@ -370,8 +649,14 @@ public class PosPricingService {
         if (paymentMethod == PaymentMethod.CASH) {
             return promotion.isAppliesToCash();
         }
-        if (paymentMethod == PaymentMethod.DEBITO || paymentMethod == PaymentMethod.CREDIT) {
+        if (paymentMethod == PaymentMethod.DEBITO) {
             return promotion.isAppliesToDebit();
+        }
+        if (paymentMethod == PaymentMethod.CREDIT) {
+            return promotion.isAppliesToCredit() || promotion.isAppliesToDebit();
+        }
+        if (paymentMethod == PaymentMethod.TRANSFER) {
+            return promotion.isAppliesToTransfer();
         }
         return false;
     }

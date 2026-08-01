@@ -1,4 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, PackageSearch, ShoppingBag } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { useSession } from "@/features/auth/session/SessionProvider";
 import { getDashboardSummary, getSalesTodayDetails } from "@/features/reports/api/reportApi";
@@ -82,25 +96,6 @@ export function DashboardPage() {
       ).sort((left, right) => right.quantity - left.quantity)
     : [];
 
-  const salesTrend = shouldLoadOperationalDetails && salesDetailsQuery.data
-    ? salesDetailsQuery.data.sales
-        .map((sale) => ({
-          label: sale.saleNumber.replace(/^S-/, ""),
-          timeLabel: formatTime(sale.confirmedAt),
-          amount: toSafeNumber(sale.totalAmount),
-        }))
-        .filter((sale) => sale.amount > 0)
-    : [];
-
-  const cumulativeTrend = salesTrend.reduce<Array<{ label: string; amount: number }>>((points, sale) => {
-    const previousAmount = points.length > 0 ? points[points.length - 1].amount : 0;
-    points.push({
-      label: sale.timeLabel,
-      amount: previousAmount + sale.amount,
-    });
-    return points;
-  }, []);
-
   const comparisonBars = isMarketAdmin
     ? collaboratorRows.map((row) => ({
         label: row.collaboratorName,
@@ -125,6 +120,34 @@ export function DashboardPage() {
         collaboratorRows,
         collaboratorProductRows,
       })
+    : [];
+  const weeklyTrend = dashboardQuery.data?.trend ?? [];
+  const paymentMethods = dashboardQuery.data?.paymentMethods ?? [];
+  const salesChange = dashboardQuery.data?.salesChangePercentage ?? 0;
+  const isPositiveChange = salesChange >= 0;
+  const recentCollaboratorSales = isCollaborator
+    ? [...(salesDetailsQuery.data?.sales ?? [])]
+        .sort((left, right) => new Date(right.confirmedAt).getTime() - new Date(left.confirmedAt).getTime())
+    : [];
+  const alertItems = dashboardQuery.data
+    ? [
+        {
+          label: "Stock crítico",
+          value: dashboardQuery.data.lowStockProducts,
+          description: isCollaborator ? "Productos de tu tienda con 5 unidades o menos." : "Productos visibles con 5 unidades o menos.",
+          to: "/products",
+          icon: PackageSearch,
+          tone: "amber" as const,
+        },
+        {
+          label: "Retiros pendientes",
+          value: dashboardQuery.data.pendingPickups,
+          description: "Retiros pendientes o con cobro en curso.",
+          to: "/pickups",
+          icon: ShoppingBag,
+          tone: "violet" as const,
+        },
+      ]
     : [];
 
   return (
@@ -151,63 +174,168 @@ export function DashboardPage() {
 
       {dashboardQuery.data ? (
         <div className="space-y-6">
+          <div className="border-y border-violet-100/80 bg-white/60 px-5 py-5 shadow-[0_16px_44px_rgba(126,94,173,0.08)]">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">Pulso comercial de hoy</p>
+                <h2 className="mt-2 text-xl font-bold text-foreground">
+                  {formatMoney(dashboardQuery.data.totalAmount)} vendidos hasta ahora
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Ayer cerraste con {formatMoney(dashboardQuery.data.previousDayAmount)} en {dashboardQuery.data.previousDaySalesCount} venta(s).
+                </p>
+              </div>
+              <div
+                className={[
+                  "inline-flex w-fit items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold",
+                  isPositiveChange
+                    ? "border-emerald-100 bg-emerald-50 text-emerald-800"
+                    : "border-rose-100 bg-rose-50 text-rose-800",
+                ].join(" ")}
+              >
+                {isPositiveChange ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
+                {formatPercentage(salesChange)} respecto de ayer
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {stats.map((stat) => (
               <StatCard key={stat.label} {...stat} />
             ))}
           </div>
 
-          {salesTrend.length > 0 ? (
-            <div className="soft-surface p-6">
-              <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+            <div className="soft-surface min-w-0 p-6">
+              <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                 <div>
-                  <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                    <div>
-                      <h2 className="text-lg font-semibold">
-                        {isCollaborator ? "Acumulado del dia" : "Linea de ventas del dia"}
-                      </h2>
-                      <p className="text-sm text-muted-foreground">
-                        {isCollaborator
-                          ? "Sigue como va creciendo tu venta acumulada durante la jornada."
-                          : "Visualiza la evolucion acumulada de ventas confirmadas durante el dia."}
-                      </p>
-                    </div>
-                    <span className="soft-chip">{salesTrend.length} venta(s) confirmadas</span>
-                  </div>
-
-                  <div className="mt-5">
-                    <LineTrendChart points={cumulativeTrend} />
-                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">Últimos 7 días</p>
+                  <h2 className="mt-2 text-lg font-semibold">Evolución de ventas</h2>
+                  <p className="text-sm text-muted-foreground">Compara el ritmo diario y detecta cambios antes del cierre mensual.</p>
                 </div>
-
-                <div>
-                  <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                    <div>
-                      <h2 className="text-lg font-semibold">
-                        {isMarketAdmin ? "Top tiendas del dia" : isCollaborator ? "Top productos del dia" : "Top espacios del dia"}
-                      </h2>
-                      <p className="text-sm text-muted-foreground">
-                        {isMarketAdmin
-                          ? "Compara rapidamente cuanto vendio cada Tienda dentro de tu Espacio."
-                          : isCollaborator
-                            ? "Detecta al instante que productos movieron mas monto hoy."
-                            : "Compara el volumen visible por Espacio durante la jornada."}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-                    {comparisonBars.slice(0, 6).map((entry) => (
-                      <SalesBar
-                        key={entry.label}
-                        label={entry.label}
-                        amount={entry.amount}
-                        maxAmount={Math.max(...comparisonBars.map((item) => item.amount), 1)}
-                      />
-                    ))}
-                  </div>
-                </div>
+                <span className="soft-chip">{weeklyTrend.reduce((total, point) => total + point.salesCount, 0)} venta(s)</span>
               </div>
+              <div className="mt-5 h-[300px]">
+                <WeeklySalesChart data={weeklyTrend} />
+              </div>
+            </div>
+
+            <div className="soft-surface min-w-0 p-6">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Cuadratura de hoy</p>
+                <h2 className="mt-2 text-lg font-semibold">Medios de pago</h2>
+                <p className="text-sm text-muted-foreground">Distribución del monto vendido durante la jornada.</p>
+              </div>
+              <div className="mt-5 h-[210px]">
+                <PaymentMethodChart data={paymentMethods} />
+              </div>
+              <div className="mt-3 space-y-2">
+                {paymentMethods.map((method, index) => (
+                  <div key={method.paymentMethod} className="flex items-center justify-between gap-3 text-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: PAYMENT_COLORS[index % PAYMENT_COLORS.length] }} />
+                      <span className="truncate text-muted-foreground">{translatePaymentMethod(method.paymentMethod)}</span>
+                    </div>
+                    <span className="font-semibold">{formatMoney(method.totalAmount)}</span>
+                  </div>
+                ))}
+                {paymentMethods.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay pagos confirmados hoy.</p> : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+            <div className="soft-surface p-6">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                <h2 className="text-lg font-semibold">Atención requerida</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">Acciones que conviene revisar durante la jornada.</p>
+              <div className="mt-5 space-y-3">
+                {alertItems.map((alert) => (
+                  <AlertLink key={alert.label} {...alert} />
+                ))}
+              </div>
+            </div>
+
+            <div className="soft-surface p-6">
+              <div>
+                <h2 className="text-lg font-semibold">
+                  {isMarketAdmin ? "Top tiendas del día" : isCollaborator ? "Top productos del día" : "Top espacios del día"}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {isMarketAdmin
+                    ? "Compara rápidamente el rendimiento de cada Tienda."
+                    : isCollaborator
+                      ? "Identifica los productos que más aportan a tus ventas."
+                      : "Compara el volumen comercial entre Espacios."}
+                </p>
+              </div>
+              <div className="mt-5 space-y-3">
+                {comparisonBars.slice(0, 6).map((entry) => (
+                  <SalesBar
+                    key={entry.label}
+                    label={entry.label}
+                    amount={entry.amount}
+                    maxAmount={Math.max(...comparisonBars.map((item) => item.amount), 1)}
+                  />
+                ))}
+                {comparisonBars.length === 0 ? <p className="text-sm text-muted-foreground">Sin movimiento confirmado hoy.</p> : null}
+              </div>
+            </div>
+          </div>
+
+          {isCollaborator ? (
+            <div className="soft-surface p-6">
+              <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Actividad reciente</p>
+                  <h2 className="mt-2 text-lg font-semibold">Últimas ventas confirmadas de hoy</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Revisa rápidamente las ventas que forman el resultado de la jornada vigente.
+                  </p>
+                </div>
+                <Link to="/sales/today" className="text-sm font-semibold text-violet-700 hover:text-violet-900">
+                  Ver detalle completo
+                </Link>
+              </div>
+
+              {salesDetailsQuery.isLoading ? (
+                <div className="mt-5">
+                  <FeedbackMessage kind="info" message="Cargando ventas recientes..." />
+                </div>
+              ) : recentCollaboratorSales.length === 0 ? (
+                <div className="mt-5">
+                  <EmptyState
+                    title="Sin ventas confirmadas hoy"
+                    description="Cuando se confirme una venta de tu Tienda, aparecerá aquí con sus productos y monto."
+                  />
+                </div>
+              ) : (
+                <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                  {recentCollaboratorSales.map((sale) => (
+                    <article key={sale.saleId} className="rounded-lg border border-border/60 bg-white/80 p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-foreground">{sale.saleNumber}</p>
+                          <p className="mt-1 text-sm text-muted-foreground">{formatDateTime(sale.confirmedAt)}</p>
+                        </div>
+                        <span className="soft-chip">{formatMoney(sale.totalAmount)}</span>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {sale.items.map((item) => (
+                          <span
+                            key={item.itemId}
+                            className="rounded-full bg-secondary/70 px-3 py-1 text-xs font-semibold text-muted-foreground"
+                          >
+                            {item.quantity} x {item.productName}
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
             </div>
           ) : null}
 
@@ -429,68 +557,96 @@ function SalesBar({
   );
 }
 
-function LineTrendChart({
-  points,
+const PAYMENT_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e"];
+
+function WeeklySalesChart({
+  data,
 }: {
-  points: Array<{
-    label: string;
-    amount: number;
-  }>;
+  data: Array<{ date: string; salesCount: number; totalAmount: number; totalNet: number }>;
 }) {
-  if (points.length === 0) {
-    return null;
-  }
-
-  const width = 640;
-  const height = 240;
-  const padding = 24;
-  const maxAmount = Math.max(...points.map((point) => point.amount), 1);
-  const chartWidth = width - padding * 2;
-  const chartHeight = height - padding * 2;
-
-  const coordinates = points.map((point, index) => {
-    const x = padding + (chartWidth * index) / Math.max(points.length - 1, 1);
-    const y = padding + chartHeight - (point.amount / maxAmount) * chartHeight;
-    return { ...point, x, y };
-  });
-
-  const path = coordinates
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(" ");
-
   return (
-    <div className="rounded-[28px] border border-white/85 bg-white/70 p-4 shadow-sm">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-56 w-full">
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
         <defs>
-          <linearGradient id="sales-trend-line" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="rgba(163,128,255,0.95)" />
-            <stop offset="100%" stopColor="rgba(255,153,194,0.92)" />
+          <linearGradient id="dashboardSalesArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.34} />
+            <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.02} />
           </linearGradient>
         </defs>
+        <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="rgba(148, 163, 184, 0.22)" />
+        <XAxis dataKey="date" tickFormatter={formatShortDate} tickLine={false} axisLine={false} fontSize={12} />
+        <YAxis tickFormatter={formatCompactMoney} tickLine={false} axisLine={false} fontSize={12} width={70} />
+        <Tooltip
+          labelFormatter={(label) => formatLongDate(String(label))}
+          formatter={(value) => [formatMoney(Number(value)), "Ventas"]}
+          contentStyle={{ borderRadius: 8, border: "1px solid rgba(226,232,240,.9)", boxShadow: "0 12px 30px rgba(88,72,120,.12)" }}
+        />
+        <Area type="monotone" dataKey="totalAmount" stroke="#8b5cf6" strokeWidth={3} fill="url(#dashboardSalesArea)" />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
 
-        {[0.25, 0.5, 0.75, 1].map((ratio) => {
-          const y = padding + chartHeight - chartHeight * ratio;
-          return <line key={ratio} x1={padding} y1={y} x2={width - padding} y2={y} stroke="rgba(203,194,228,0.35)" strokeDasharray="4 6" />;
-        })}
-
-        <path d={path} fill="none" stroke="url(#sales-trend-line)" strokeWidth="4" strokeLinecap="round" />
-
-        {coordinates.map((point) => (
-          <g key={`${point.label}-${point.x}`}>
-            <circle cx={point.x} cy={point.y} r="5" fill="white" stroke="rgba(163,128,255,0.95)" strokeWidth="3" />
-          </g>
-        ))}
-      </svg>
-
-      <div className="mt-4 grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
-        {coordinates.slice(-3).map((point) => (
-          <div key={`${point.label}-legend`} className="rounded-[18px] border border-white/80 bg-white/80 px-3 py-2">
-            <p className="font-semibold text-foreground">{point.label}</p>
-            <p className="mt-1">{formatMoney(point.amount)}</p>
-          </div>
-        ))}
+function PaymentMethodChart({
+  data,
+}: {
+  data: Array<{ paymentMethod: string; salesCount: number; totalAmount: number }>;
+}) {
+  if (data.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/70 text-sm text-muted-foreground">
+        Sin pagos confirmados
       </div>
-    </div>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <PieChart>
+        <Pie data={data} dataKey="totalAmount" nameKey="paymentMethod" innerRadius={54} outerRadius={82} paddingAngle={3}>
+          {data.map((entry, index) => (
+            <Cell key={entry.paymentMethod} fill={PAYMENT_COLORS[index % PAYMENT_COLORS.length]} />
+          ))}
+        </Pie>
+        <Tooltip formatter={(value) => formatMoney(Number(value))} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+function AlertLink({
+  label,
+  value,
+  description,
+  to,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  description: string;
+  to: string;
+  icon: typeof AlertTriangle;
+  tone: "amber" | "violet";
+}) {
+  const toneClasses =
+    tone === "amber"
+      ? "border-amber-100 bg-amber-50/70 text-amber-900"
+      : "border-violet-100 bg-violet-50/70 text-violet-900";
+
+  return (
+    <Link to={to} className={["flex items-center gap-3 rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-sm", toneClasses].join(" ")}>
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/75">
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-semibold">{label}</p>
+          <span className="text-xl font-bold">{value}</span>
+        </div>
+        <p className="mt-1 text-xs opacity-75">{description}</p>
+      </div>
+    </Link>
   );
 }
 
@@ -500,6 +656,54 @@ function formatMoney(value: number) {
     currency: "CLP",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatCompactMoney(value: number) {
+  return new Intl.NumberFormat("es-CL", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function formatPercentage(value: number) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatShortDate(value: string) {
+  const date = parseLocalDate(value);
+  return new Intl.DateTimeFormat("es-CL", { weekday: "short" }).format(date).replace(".", "");
+}
+
+function formatLongDate(value: string) {
+  return new Intl.DateTimeFormat("es-CL", { weekday: "long", day: "numeric", month: "long" }).format(parseLocalDate(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("es-CL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function parseLocalDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function translatePaymentMethod(value: string) {
+  return {
+    CASH: "Efectivo",
+    DEBITO: "Débito",
+    DEBIT: "Débito",
+    CREDIT: "Crédito",
+    TRANSFER: "Transferencia",
+    OTHER: "Otro",
+    UNKNOWN: "Sin definir",
+  }[value] ?? value;
 }
 
 function resolveStoreSalesCount(store: {
@@ -548,13 +752,6 @@ function toSafeNumber(value: unknown) {
   }
 
   return 0;
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat("es-CL", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

@@ -68,6 +68,21 @@ export type DashboardSummary = {
   totalNet: number;
   activeProducts: number;
   lowStockProducts: number;
+  pendingPickups: number;
+  previousDaySalesCount: number;
+  previousDayAmount: number;
+  salesChangePercentage: number;
+  trend: Array<{
+    date: string;
+    salesCount: number;
+    totalAmount: number;
+    totalNet: number;
+  }>;
+  paymentMethods: Array<{
+    paymentMethod: string;
+    salesCount: number;
+    totalAmount: number;
+  }>;
   stores: ReportStoreSummary[];
 };
 

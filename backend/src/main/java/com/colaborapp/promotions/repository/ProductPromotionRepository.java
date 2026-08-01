@@ -14,6 +14,8 @@ public interface ProductPromotionRepository extends JpaRepository<ProductPromoti
 
     Optional<ProductPromotion> findFirstByProductIdOrderByIdAsc(Long productId);
 
+    Optional<ProductPromotion> findByPromotionCampaignIdAndProductId(Long promotionCampaignId, Long productId);
+
     @Query("""
             select pp from ProductPromotion pp
             where pp.product.id = :productId
@@ -31,6 +33,7 @@ public interface ProductPromotionRepository extends JpaRepository<ProductPromoti
     @Query("""
             select pp from ProductPromotion pp
             join fetch pp.product p
+            left join fetch pp.promotionCampaign pc
             where p.id in :productIds
               and pp.active = true
               and (pp.startsAt is null or pp.startsAt <= :referenceTime)
@@ -44,4 +47,16 @@ public interface ProductPromotionRepository extends JpaRepository<ProductPromoti
     List<ProductPromotion> findActiveByProductIds(
             @Param("productIds") List<Long> productIds,
             @Param("referenceTime") Instant referenceTime);
+
+    @Query("""
+            select pp from ProductPromotion pp
+            join fetch pp.product p
+            where pp.promotionCampaign.id = :promotionCampaignId
+            order by p.name asc
+            """)
+    List<ProductPromotion> findAllByPromotionCampaignIdOrderByProductNameAsc(@Param("promotionCampaignId") Long promotionCampaignId);
+
+    long countByPromotionCampaignId(Long promotionCampaignId);
+
+    void deleteByPromotionCampaignId(Long promotionCampaignId);
 }

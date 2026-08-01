@@ -65,4 +65,18 @@ public interface PickupRepository extends JpaRepository<Pickup, Long> {
             @Param("pickupNumber") String pickupNumber);
 
     List<Pickup> findAllByLinkedSaleId(Long saleId);
+
+    @Query("""
+            select count(p) from Pickup p
+            where p.tenant.id = :tenantId
+              and (:marketIdsEmpty = true or p.market.id in :marketIds)
+              and (:collaboratorUserId is null or p.collaboratorUserId = :collaboratorUserId)
+              and p.status in :statuses
+            """)
+    long countDashboardPending(
+            @Param("tenantId") Long tenantId,
+            @Param("marketIds") List<Long> marketIds,
+            @Param("marketIdsEmpty") boolean marketIdsEmpty,
+            @Param("collaboratorUserId") Long collaboratorUserId,
+            @Param("statuses") List<PickupStatus> statuses);
 }

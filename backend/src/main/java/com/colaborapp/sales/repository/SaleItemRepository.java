@@ -95,4 +95,16 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
             @Param("status") com.colaborapp.sales.domain.SaleStatus status,
             @Param("startAt") Instant startAt,
             @Param("endAt") Instant endAt);
+
+    @Query("""
+            select si from SaleItem si
+            join fetch si.sale sale
+            where si.product.id = :productId
+              and sale.tenant.id = :tenantId
+              and sale.status = com.colaborapp.sales.domain.SaleStatus.CONFIRMED
+            order by sale.confirmedAt desc, si.id desc
+            """)
+    List<SaleItem> findConfirmedSalesByProductId(
+            @Param("tenantId") Long tenantId,
+            @Param("productId") Long productId);
 }
